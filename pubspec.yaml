@@ -1,0 +1,59 @@
+name: picaflorapp
+description: Picaflor — conoce gente cerca de ti en Santiago. Chat local, limpio y simple.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # Navigation
+  go_router: ^14.2.0
+
+  # Firebase
+  firebase_core: ^3.3.0
+  firebase_auth: ^5.1.2
+  cloud_firestore: ^5.2.0
+  firebase_storage: ^12.1.1
+  google_sign_in: ^6.2.1
+  sign_in_with_apple: ^6.1.1
+  crypto: ^3.0.3
+
+  # Location
+  geolocator: ^12.0.0
+  permission_handler: ^11.3.1
+
+  # UI / UX
+  google_fonts: ^6.2.1
+  cached_network_image: ^3.3.1
+  shimmer: ^3.0.0
+  flutter_animate: ^4.5.0
+  gap: ^3.0.1
+  intl: ^0.20.2
+
+  # Utils
+  shared_preferences: ^2.2.3
+  uuid: ^4.4.0
+  equatable: ^2.0.5
+  collection: ^1.18.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  riverpod_generator: ^2.4.0
+  build_runner: ^2.4.11
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
