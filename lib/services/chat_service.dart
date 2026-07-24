@@ -156,6 +156,7 @@ class ChatService {
     try {
       final batch = _db!.batch();
       batch.set(msgRef, message.toCreateMap());
+      // Nested map + FieldValue.increment (merge) actualiza unreadCount[uid].
       batch.set(
         _chats.doc(chatId),
         {
@@ -164,8 +165,10 @@ class ChatService {
           'lastMessageSenderId': senderId,
           'lastMessageAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
-          'unreadCount.$otherUid': FieldValue.increment(1),
-          'unreadCount.$senderId': 0,
+          'unreadCount': {
+            otherUid: FieldValue.increment(1),
+            senderId: 0,
+          },
         },
         SetOptions(merge: true),
       );
@@ -188,7 +191,7 @@ class ChatService {
     if (chatId.contains('demo_')) return;
     try {
       await _chats.doc(chatId).set({
-        'unreadCount.$uid': 0,
+        'unreadCount': {uid: 0},
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {

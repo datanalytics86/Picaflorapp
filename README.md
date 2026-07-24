@@ -4,87 +4,71 @@ App Flutter + Firebase para conocer gente cerca en el **Gran Santiago**.
 
 Diseño minimalista estilo Fintual/BCI: whitespace generoso, Poppins, cards suaves, textos en español chileno.
 
-## Estado del código
+> **Deploy:** ver [DEPLOY.md](./DEPLOY.md) — checklist completo web / Android / iOS / Firebase.
+
+## Estado
 
 | Capa | Estado |
 |------|--------|
-| Design system (colors, typography, theme, spacing) | ✅ |
-| Widgets Tier 1 | ✅ |
-| AuthService (email, Google, Apple, phone) | ✅ |
-| LocationService (ubicación aproximada) | ✅ |
-| UserService / ChatService | ✅ |
-| Providers Riverpod | ✅ |
-| Nearby + demos fallback | ✅ |
-| Chat list / Chat / Profile / Settings | ✅ |
-| Router + redirects auth | ✅ |
-| **Modo demo sin Firebase** (default) | ✅ |
+| Design system + widgets | ✅ |
+| Auth (email, Google, Apple, phone) + demo | ✅ |
+| Location approx (~150 m fuzz) | ✅ |
+| Nearby + chat + perfil + settings | ✅ |
+| Router + redirects | ✅ |
+| Firestore rules + indexes + Storage rules | ✅ |
+| Android release (minSdk 23, ProGuard, signing) | ✅ |
+| Web PWA + Firebase Hosting config | ✅ |
+| CI (analyze / test / build web) | ✅ |
+| Firebase real (`flutterfire configure`) | ⬜ manual |
+| Keystore / Play Store / App Store | ⬜ manual |
 
-## Modo demo (sin Firebase)
+## Modo demo (default)
 
-Por defecto la app arranca en **demo** (`AppConfig.demoMode = true`):
+Por defecto `DEMO_MODE=true` (sin Firebase):
 
-- No inicializa Firebase
-- Login con botón **“Entrar en demo”** (o cualquier correo/clave válidos)
-- Teléfono demo: código SMS `123456`
-- Gente cerca, chats y mensajes en memoria (con auto-respuesta)
-- Ubicación: GPS real si hay permiso; si no, centro de Santiago
+- Login: **Entrar en demo** o cualquier correo/clave válidos  
+- SMS demo: código `123456`  
+- Nearby, chats y auto-reply en memoria  
+- Ubicación: GPS real o centro de Santiago  
 
 ```powershell
-# Demo (default)
+flutter pub get
 flutter run
 
-# Producción con Firebase
+# Producción
 flutter run --dart-define=DEMO_MODE=false
 ```
 
 ## Setup rápido
 
-> **Windows:** activa *Modo de desarrollador* (symlinks para plugins):
-> `start ms-settings:developers` → activar **Modo de desarrollador**.
+> **Windows:** activa *Modo de desarrollador* (symlinks de plugins):  
+> `start ms-settings:developers`
 
 ```powershell
-# Si flutter no está en PATH:
-$env:Path = "C:\Users\nicolas.andrade\flutter\bin;" + $env:Path
+# PATH de Flutter si hace falta
+$env:Path = "C:\src\flutter\bin;" + $env:Path
 
-cd C:\Users\nicolas.andrade\Documents\picaflorapp
-
-# Plataformas android/ios/web ya generadas; si faltan:
-# flutter create . --project-name picaflorapp --org com.picaflor.app
-
+cd C:\src\Picaflorapp   # o la ruta de tu clone
 flutter pub get
+flutter analyze
+flutter test
+
+# Web
+.\scripts\build_web.ps1
+
+# Android (requiere SDK)
+.\scripts\build_apk.ps1
+```
+
+### Firebase
+
+```powershell
 dart pub global activate flutterfire_cli
 flutterfire configure
-flutter run
+firebase deploy --only firestore:rules,firestore:indexes,storage,hosting
 ```
 
-### Firebase Console
-
-1. **Authentication**: Email/Password, Google, Apple, Phone  
-2. **Firestore**: crear DB + pegar `firestore.rules`  
-3. **iOS**: Sign in with Apple capability  
-4. **Android**: SHA-1 en Firebase para Google / Phone  
-
-### Permisos de ubicación
-
-**Android** (`android/app/src/main/AndroidManifest.xml`):
-
-```xml
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-```
-
-**iOS** (`ios/Runner/Info.plist`):
-
-```xml
-<key>NSLocationWhenInUseUsageDescription</key>
-<string>Picaflor usa tu zona aproximada para mostrarte gente cerca en Santiago.</string>
-```
-
-## Privacidad de ubicación
-
-- Nunca se guardan coordenadas exactas.
-- `LocationService.fuzz` redondea a grilla ~150 m.
-- Las distancias en UI son aproximadas (`muy cerca`, `~200 m`).
+Detalle en [DEPLOY.md](./DEPLOY.md).
 
 ## Rutas
 
@@ -97,7 +81,7 @@ flutter run
 | `/chat-list` | Lista de chats |
 | `/chat/:id` | Chat 1:1 |
 | `/profile` | Perfil |
-| `/settings` | Ajustes |
+| `/settings` | Ajustes + legal |
 
 ## Estructura
 
@@ -105,12 +89,17 @@ flutter run
 lib/
   main.dart
   router/app_router.dart
-  core/theme|utils|constants/
-  models/
-  services/
-  providers/
-  widgets/          # Tier 1
-  screens/          # implementación
-  features/*/screens/  # re-exports
-  data/demo_nearby.dart
+  core/config|theme|utils|constants/
+  models/ services/ providers/ widgets/ screens/
+  data/demo_store.dart · demo_nearby.dart
 ```
+
+## Privacidad de ubicación
+
+- Nunca se guardan coordenadas exactas  
+- `LocationService.fuzz` redondea a grilla ~150 m  
+- UI: `muy cerca`, `cerca`, `~200 m`, etc.  
+
+## Licencia
+
+Privado / uso del proyecto Picaflor.

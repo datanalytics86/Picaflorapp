@@ -1,0 +1,49 @@
+name: Deploy Web (Firebase Hosting)
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo_mode:
+        description: "DEMO_MODE (true = sin Firebase real)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  # Descomenta para deploy automático en push a main:
+  # push:
+  #   branches: [main]
+
+jobs:
+  deploy:
+    name: Build + Firebase Hosting
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build Web
+        run: |
+          flutter build web \
+            --release \
+            --dart-define=DEMO_MODE=${{ inputs.demo_mode || 'true' }} \
+            --base-href /
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: picaflorapp
+        # Si no hay secret, el step falla: configúralo en GitHub → Settings → Secrets

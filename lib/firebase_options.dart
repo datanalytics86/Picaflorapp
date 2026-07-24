@@ -1,9 +1,9 @@
-// Archivo placeholder. Reemplázalo con el generado por FlutterFire CLI:
+// Placeholder hasta que corras FlutterFire CLI:
 //   dart pub global activate flutterfire_cli
 //   flutterfire configure
 //
-// Mientras tanto, main.dart intenta inicializar Firebase y continúa
-// en modo degradado si no hay configuración válida.
+// [isConfigured] es false mientras haya claves YOUR_* / ceros.
+// main.dart solo inicializa Firebase si isConfigured && !demoMode.
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
@@ -26,7 +26,21 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // ⚠️ Reemplaza estos valores con los de tu proyecto Firebase.
+  /// `false` si aún no se corrió `flutterfire configure`.
+  static bool get isConfigured {
+    final o = currentPlatform;
+    if (o.apiKey.isEmpty ||
+        o.apiKey.startsWith('YOUR_') ||
+        o.appId.startsWith('YOUR_') ||
+        o.appId.contains('000000000000') ||
+        o.messagingSenderId == '000000000000' ||
+        o.messagingSenderId.startsWith('YOUR_')) {
+      return false;
+    }
+    return true;
+  }
+
+  // ⚠️ Reemplaza con los valores de tu proyecto Firebase (flutterfire configure).
   static const FirebaseOptions web = FirebaseOptions(
     apiKey: 'YOUR_API_KEY',
     appId: 'YOUR_APP_ID',

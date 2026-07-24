@@ -1,13 +1,14 @@
 {
-    "name": "picaflorapp",
-    "short_name": "picaflorapp",
+    "name": "Picaflor",
+    "short_name": "Picaflor",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0E1116",
+    "theme_color": "#1FA89A",
+    "description": "Conoce gente cerca de ti en Santiago. Chat local, limpio y simple.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "lang": "es-CL",
     "icons": [
         {
             "src": "icons/Icon-192.png",

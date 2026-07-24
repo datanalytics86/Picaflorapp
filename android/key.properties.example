@@ -1,0 +1,8 @@
+# Copia a android/key.properties (NO lo subas a git) y completa:
+storePassword=tu_store_password
+keyPassword=tu_key_password
+keyAlias=picaflor
+storeFile=../keystore/picaflor-release.jks
+
+# Generar keystore (una sola vez):
+# keytool -genkey -v -keystore keystore/picaflor-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias picaflor

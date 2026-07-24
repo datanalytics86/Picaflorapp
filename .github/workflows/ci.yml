@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  analyze-test-web:
+    name: Analyze · Test · Build Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Build Web (demo)
+        run: |
+          flutter build web \
+            --release \
+            --dart-define=DEMO_MODE=true \
+            --base-href /
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-demo
+          path: build/web
+          retention-days: 7
+
+  # Build Android solo si hay secrets de firma (opcional).
+  android-release:
+    name: Android APK (optional)
+    runs-on: ubuntu-latest
+    if: ${{ false }} # Activa cuando tengas Android SDK + keystore en secrets
+    needs: analyze-test-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: flutter pub get
+      - run: |
+          flutter build apk --release \
+            --dart-define=DEMO_MODE=false

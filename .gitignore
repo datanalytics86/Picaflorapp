@@ -28,6 +28,16 @@ google-services.json
 GoogleService-Info.plist
 .env
 .env.*
+keystore/
+*.p8
+*.mobileprovision
+service-account*.json
+firebase-service-account*.json
 
-# Coverage
+# Coverage / tooling
 coverage/
+.firebase/
+*.log
+
+# Local overrides
+local.properties

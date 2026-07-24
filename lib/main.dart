@@ -32,11 +32,17 @@ Future<void> main() async {
 
   if (AppConfig.demoMode) {
     debugPrint('🐦 Picaflor en MODO DEMO (sin Firebase)');
+  } else if (!DefaultFirebaseOptions.isConfigured) {
+    debugPrint(
+      '⚠️ DEMO_MODE=false pero firebase_options.dart aún es placeholder. '
+      'Corre: flutterfire configure',
+    );
   } else {
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      debugPrint('🐦 Picaflor · Firebase listo');
     } catch (e, st) {
       debugPrint('Firebase no inicializado: $e');
       debugPrint('$st');
@@ -63,7 +69,8 @@ class PicaflorApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: AppConstants.appName,
-      debugShowCheckedModeBanner: AppConfig.demoMode,
+      // Banner solo en debug + demo; release siempre limpio.
+      debugShowCheckedModeBanner: AppConfig.demoMode && !AppConfig.isRelease,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeMode,

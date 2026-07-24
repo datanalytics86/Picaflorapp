@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -222,6 +223,76 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ),
                 ],
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('Legal'),
+          const SizedBox(height: AppSpacing.sm),
+          PicaflorSurface(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('Privacidad'),
+                  subtitle: const Text(
+                    AppConfig.privacyPolicyUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.copy_rounded, size: 18),
+                  onTap: () async {
+                    await Clipboard.setData(
+                      const ClipboardData(text: AppConfig.privacyPolicyUrl),
+                    );
+                    await Haptic.light();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Link de privacidad copiado'),
+                      ),
+                    );
+                  },
+                ),
+                _div(isDark),
+                ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: const Text('Términos'),
+                  subtitle: const Text(
+                    AppConfig.termsUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.copy_rounded, size: 18),
+                  onTap: () async {
+                    await Clipboard.setData(
+                      const ClipboardData(text: AppConfig.termsUrl),
+                    );
+                    await Haptic.light();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link de términos copiado')),
+                    );
+                  },
+                ),
+                _div(isDark),
+                ListTile(
+                  leading: const Icon(Icons.mail_outline_rounded),
+                  title: const Text('Soporte'),
+                  subtitle: const Text(AppConfig.supportEmail),
+                  trailing: const Icon(Icons.copy_rounded, size: 18),
+                  onTap: () async {
+                    await Clipboard.setData(
+                      const ClipboardData(text: AppConfig.supportEmail),
+                    );
+                    await Haptic.light();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Email copiado')),
+                    );
+                  },
+                ),
               ],
             ),
           ),
