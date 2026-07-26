@@ -88,14 +88,16 @@ class _NearbyMapState extends State<NearbyMap> {
               ),
             ),
             children: [
+              // Carto CDN (más permisivo en web que tile.openstreetmap.org).
               TileLayer(
                 urlTemplate: isDark
-                    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-                    : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: isDark ? const ['a', 'b', 'c', 'd'] : const [],
+                    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+                    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.picaflor.app.picaflorapp',
-                // Retina-friendly en Carto.
-                retinaMode: isDark && RetinaMode.isHighDensity(context),
+                maxNativeZoom: 19,
+                keepBuffer: 1,
+                panBuffer: 0,
               ),
               // Radio de búsqueda (approx).
               CircleLayer(

@@ -73,13 +73,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isOnboarding = loc == AppRoutes.onboarding;
       final isLogin = loc == AppRoutes.login;
 
-      // Auth cargando → splash.
-      if (authAsync.isLoading) {
-        return isSplash ? null : AppRoutes.splash;
-      }
-
-      // Error de auth: tratamos como no logueado.
-      final isLoggedIn = authAsync.asData?.value != null;
+      // NUNCA atrapar al usuario en splash por un StreamProvider loading eterno.
+      // Si aún no hay valor, tratamos como "sin sesión" y seguimos el flujo.
+      final isLoggedIn = authAsync.hasValue && authAsync.requireValue != null;
 
       // Onboarding pendiente.
       if (!onboardingDone) {
@@ -90,7 +86,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Sin sesión → login (salvo que ya esté ahí).
       if (!isLoggedIn) {
         if (isLogin) return null;
-        // Splash redirige a login cuando ya pasó onboarding.
         if (isSplash) return AppRoutes.login;
         return AppRoutes.login;
       }

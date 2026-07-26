@@ -1,8 +1,10 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -16,19 +18,44 @@ import 'router/app_router.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  // Nunca bloquear el primer frame esperando fonts de red.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-    ),
-  );
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+      ),
+    );
+  } catch (e) {
+    debugPrint('SystemChrome skip: $e');
+  }
 
-  await initializeDateFormatting('es');
-  final prefs = await SharedPreferences.getInstance();
+  try {
+    await initializeDateFormatting('es');
+  } catch (e) {
+    debugPrint('date formatting skip: $e');
+  }
+
+  late final SharedPreferences prefs;
+  try {
+    prefs = await SharedPreferences.getInstance().timeout(
+      const Duration(seconds: 3),
+    );
+  } catch (e) {
+    debugPrint('SharedPreferences retry: $e');
+    prefs = await SharedPreferences.getInstance();
+  }
+
+  if (kDebugMode) {
+    debugPrint(
+      '🐦 boot demo=${AppConfig.demoMode} web=$kIsWeb',
+    );
+  }
 
   if (AppConfig.demoMode) {
     debugPrint('🐦 Picaflor en MODO DEMO (sin Firebase)');

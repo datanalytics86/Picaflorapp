@@ -28,9 +28,19 @@ class DemoStore {
   AuthSession? get session => _session;
   String? get currentUid => _session?.uid;
 
-  Stream<AuthSession?> get authStateChanges async* {
-    yield _session;
-    yield* _authCtrl.stream;
+  /// Stream de sesión: emite altiro el valor actual y luego cambios.
+  /// Usa [Stream.multi] (no `async*` + broadcast) para que Riverpod
+  /// no se quede en `isLoading` eterno en web.
+  Stream<AuthSession?> get authStateChanges {
+    return Stream<AuthSession?>.multi((listener) {
+      listener.add(_session);
+      final sub = _authCtrl.stream.listen(
+        listener.add,
+        onError: listener.addError,
+        onDone: listener.close,
+      );
+      listener.onCancel = () => sub.cancel();
+    });
   }
 
   // ── Users ──────────────────────────────────────────────────────────────
@@ -80,7 +90,7 @@ class DemoStore {
     String? email,
     String? displayName,
   }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    // Sin delay artificial: en web se siente como freeze.
     final me = _users[AppConfig.demoUid] ??
         _defaultMe(email: email, displayName: displayName);
     final profile = me.copyWith(
@@ -399,7 +409,7 @@ class DemoStore {
     required String myUid,
     required String otherUid,
   }) async {
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
     if (_session?.uid != myUid) return;
 
     final replies = [

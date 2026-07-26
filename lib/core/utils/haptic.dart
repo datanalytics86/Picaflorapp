@@ -1,34 +1,47 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Feedback háptico sutil y consistente en toda la app.
+/// Feedback háptico sutil. En **web** es no-op (evita jank / colgadas).
 abstract final class Haptic {
-  /// Toque ligero (tap de lista, chip, refresh).
   static Future<void> light() async {
-    await HapticFeedback.lightImpact();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.lightImpact();
+    } catch (_) {}
   }
 
-  /// Confirmación media (enviar mensaje, guardar perfil).
   static Future<void> medium() async {
-    await HapticFeedback.mediumImpact();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.mediumImpact();
+    } catch (_) {}
   }
 
-  /// Acción fuerte (logout, error grave).
   static Future<void> heavy() async {
-    await HapticFeedback.heavyImpact();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.heavyImpact();
+    } catch (_) {}
   }
 
-  /// Selección (slider, tab, toggle).
   static Future<void> selection() async {
-    await HapticFeedback.selectionClick();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.selectionClick();
+    } catch (_) {}
   }
 
-  /// Éxito suave (chat abierto, permiso concedido).
   static Future<void> success() async {
-    await HapticFeedback.mediumImpact();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.mediumImpact();
+    } catch (_) {}
   }
 
-  /// Warning / denegación.
   static Future<void> warning() async {
-    await HapticFeedback.vibrate();
+    if (kIsWeb) return;
+    try {
+      await HapticFeedback.vibrate();
+    } catch (_) {}
   }
 }

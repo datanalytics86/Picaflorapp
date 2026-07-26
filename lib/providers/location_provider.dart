@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -100,9 +102,19 @@ class LocationController extends StateNotifier<LocationState> {
   Future<bool> refresh({bool updateFirestore = true}) async {
     // ── Demo: instantáneo, sin GPS ──────────────────────────────────────
     if (AppConfig.demoMode) {
-      _useSantiagoFallback();
+      // Ya tenemos Santiago en el estado inicial; reafirma y listo.
+      if (!state.hasLocation) {
+        _useSantiagoFallback();
+      } else {
+        state = state.copyWith(
+          isLoading: false,
+          permission: LocationPermissionStatus.granted,
+          clearError: true,
+        );
+      }
+      // Sync de perfil demo sin bloquear el UI thread.
       if (updateFirestore) {
-        await _syncLocationToProfile();
+        unawaited(_syncLocationToProfile());
       }
       return true;
     }

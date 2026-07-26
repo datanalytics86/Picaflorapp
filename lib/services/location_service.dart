@@ -253,13 +253,32 @@ class LocationService {
   }
 
   /// Distancia en metros entre dos puntos (ya deberían ser approx).
+  /// No usa Geolocator (evita side-effects / colgadas en web).
   double distanceMeters(
     double lat1,
     double lon1,
     double lat2,
     double lon2,
   ) {
-    return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
+    return _haversineMeters(lat1, lon1, lat2, lon2);
+  }
+
+  static double _haversineMeters(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * math.pi / 180;
+    final dLon = (lon2 - lon1) * math.pi / 180;
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) *
+            math.cos(lat2 * math.pi / 180) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return r * c;
   }
 
   /// Etiqueta de distancia aproximada en español chileno.

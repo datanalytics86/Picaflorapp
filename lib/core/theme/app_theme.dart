@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -65,7 +66,8 @@ abstract final class AppTheme {
       canvasColor:
           isDark ? AppColors.darkBackground : AppColors.lightBackground,
       dividerColor: isDark ? AppColors.darkDivider : AppColors.lightDivider,
-      splashFactory: InkSparkle.splashFactory,
+      // InkSparkle es pesado / problemático en web.
+      splashFactory: kIsWeb ? InkRipple.splashFactory : InkSparkle.splashFactory,
       visualDensity: VisualDensity.standard,
 
       appBarTheme: AppBarTheme(

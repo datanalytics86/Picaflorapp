@@ -10,10 +10,18 @@ final authServiceProvider = Provider<AuthService>((ref) {
 });
 
 /// Sesión autenticada (demo o Firebase), desacoplada de `firebase_auth.User`.
+///
+/// Timeout de seguridad: si el stream no emite en 1.5s, asume sin sesión
+/// (evita splash infinito en web).
 final authStateProvider = StreamProvider<AuthSession?>((ref) {
   try {
-    return ref.watch(authServiceProvider).authStateChanges;
-  } catch (e) {
+    return ref.watch(authServiceProvider).authStateChanges.timeout(
+      const Duration(milliseconds: 1500),
+      onTimeout: (sink) {
+        sink.add(null);
+      },
+    );
+  } catch (_) {
     return Stream.value(null);
   }
 });
