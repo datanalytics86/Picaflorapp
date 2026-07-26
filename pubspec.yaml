@@ -32,6 +32,10 @@ dependencies:
   geolocator: ^12.0.0
   permission_handler: ^11.3.1
 
+  # Map (OSM tiles, sin API key)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
   # UI / UX
   google_fonts: ^6.2.1
   cached_network_image: ^3.3.1

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../core/config/app_config.dart';
 import '../core/constants/santiago_bounds.dart';
 
 /// Ubicación **aproximada** (nunca coordenadas exactas).
@@ -28,8 +30,7 @@ class ApproxLocation {
 
   final DateTime timestamp;
 
-  bool get isInSantiago =>
-      SantiagoBounds.contains(latitude, longitude);
+  bool get isInSantiago => SantiagoBounds.contains(latitude, longitude);
 
   @override
   String toString() =>
@@ -54,10 +55,15 @@ enum LocationPermissionStatus {
 }
 
 /// Servicio de ubicación con privacidad-first y validación Santiago.
+///
+/// En [AppConfig.demoMode] **nunca** toca Geolocator (evita freezes en web).
 class LocationService {
   /// Tamaño de grilla en grados ≈ 150 m (lat).
   /// 0.001° lat ≈ 111 m → 0.0014° ≈ 155 m.
   static const double _gridDegrees = 0.0014;
+
+  /// Timeout de GPS en producción (web cuelga si es muy largo).
+  static const Duration _currentPositionTimeout = Duration(seconds: 8);
 
   /// Redondea una coordenada a la grilla de privacidad.
   static double approximateCoordinate(double value) {
@@ -79,12 +85,62 @@ class LocationService {
     );
   }
 
+  /// Centro de Santiago ya fuzzed (modo demo / fallback).
+  static ApproxLocation santiagoCenterApprox() {
+    return fuzz(
+      latitude: SantiagoBounds.centerLatitude,
+      longitude: SantiagoBounds.centerLongitude,
+      accuracyMeters: 150,
+    );
+  }
+
   /// Estado actual de permisos (sin pedirlos).
   Future<LocationPermissionStatus> checkPermissionStatus() async {
-    final enabled = await Geolocator.isLocationServiceEnabled();
-    if (!enabled) return LocationPermissionStatus.serviceDisabled;
+    if (AppConfig.demoMode) {
+      return LocationPermissionStatus.granted;
+    }
 
-    final permission = await Geolocator.checkPermission();
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return LocationPermissionStatus.serviceDisabled;
+
+      final permission = await Geolocator.checkPermission();
+      return _mapPermission(permission);
+    } catch (e) {
+      debugPrint('checkPermissionStatus error: $e');
+      // En web el plugin a veces falla sin prompt.
+      if (kIsWeb) return LocationPermissionStatus.unknown;
+      return LocationPermissionStatus.unknown;
+    }
+  }
+
+  /// Pide permiso si hace falta. No lanza: devuelve el estado final.
+  Future<LocationPermissionStatus> requestPermission() async {
+    if (AppConfig.demoMode) {
+      return LocationPermissionStatus.granted;
+    }
+
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return LocationPermissionStatus.serviceDisabled;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      return _mapPermission(permission);
+    } catch (e) {
+      debugPrint('requestPermission error: $e');
+      if (kIsWeb) {
+        // El browser puede bloquear el prompt; el caller muestra mensaje.
+        return LocationPermissionStatus.denied;
+      }
+      return LocationPermissionStatus.unknown;
+    }
+  }
+
+  LocationPermissionStatus _mapPermission(LocationPermission permission) {
     switch (permission) {
       case LocationPermission.denied:
         return LocationPermissionStatus.denied;
@@ -98,37 +154,18 @@ class LocationService {
     }
   }
 
-  /// Pide permiso si hace falta. No lanza: devuelve el estado final.
-  Future<LocationPermissionStatus> requestPermission() async {
-    final enabled = await Geolocator.isLocationServiceEnabled();
-    if (!enabled) return LocationPermissionStatus.serviceDisabled;
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.denied) {
-      return LocationPermissionStatus.denied;
-    }
-    if (permission == LocationPermission.deniedForever) {
-      return LocationPermissionStatus.permanentlyDenied;
-    }
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      return LocationPermissionStatus.granted;
-    }
-    return LocationPermissionStatus.unknown;
-  }
-
   /// Obtiene ubicación **aproximada** actual.
   ///
-  /// - Usa precisión media (no high) para no forzar GPS exacto.
+  /// - Demo: centro de Santiago, sin GPS.
+  /// - Prod: lastKnown → getCurrentPosition (8s).
   /// - Nunca devuelve coords crudas: siempre pasan por [fuzz].
-  /// - Valida bounding box de Santiago si [forceSantiago] es true.
   Future<ApproxLocation> getApproxLocation({
     bool forceSantiago = true,
   }) async {
+    if (AppConfig.demoMode) {
+      return santiagoCenterApprox();
+    }
+
     final status = await requestPermission();
     if (status == LocationPermissionStatus.serviceDisabled) {
       throw LocationServiceException(
@@ -138,7 +175,9 @@ class LocationService {
     }
     if (status == LocationPermissionStatus.denied) {
       throw LocationServiceException(
-        'Necesitamos tu ubicación (aproximada) para mostrarte gente cerca.',
+        kIsWeb
+            ? 'Permite la ubicación en el navegador para ver gente cerca.'
+            : 'Necesitamos tu ubicación (aproximada) para mostrarte gente cerca.',
         status: status,
       );
     }
@@ -156,11 +195,19 @@ class LocationService {
     }
 
     try {
-      // Media: suficiente para “cerca”, sin obsesionarse con el metro exacto.
-      // geolocator 12 expone desiredAccuracy/timeLimit (no locationSettings).
-      final position = await Geolocator.getCurrentPosition(
+      Position? position;
+
+      // 1) Last known: instantáneo cuando existe (nativo / algo de web).
+      try {
+        position = await Geolocator.getLastKnownPosition();
+      } catch (e) {
+        debugPrint('getLastKnownPosition error: $e');
+      }
+
+      // 2) Current con timeout corto (evita freeze en web).
+      position ??= await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
-        timeLimit: const Duration(seconds: 15),
+        timeLimit: _currentPositionTimeout,
       );
 
       final approx = fuzz(
@@ -171,7 +218,6 @@ class LocationService {
       );
 
       if (forceSantiago && !approx.isInSantiago) {
-        // También validamos la posición cruda por si el fuzz mueve el borde.
         final rawIn = SantiagoBounds.contains(
           position.latitude,
           position.longitude,
@@ -187,10 +233,20 @@ class LocationService {
       return approx;
     } on LocationServiceException {
       rethrow;
+    } on TimeoutException {
+      debugPrint('getApproxLocation timeout');
+      throw LocationServiceException(
+        kIsWeb
+            ? 'La ubicación tardó demasiado en el navegador. Intenta de nuevo o revisa los permisos del sitio.'
+            : 'La ubicación tardó demasiado. Inténtalo de nuevo.',
+        status: LocationPermissionStatus.granted,
+      );
     } catch (e) {
       debugPrint('getApproxLocation error: $e');
       throw LocationServiceException(
-        'No pudimos obtener tu ubicación. Inténtalo de nuevo.',
+        kIsWeb
+            ? 'No pudimos obtener tu ubicación en el navegador.'
+            : 'No pudimos obtener tu ubicación. Inténtalo de nuevo.',
         status: LocationPermissionStatus.granted,
       );
     }
@@ -223,11 +279,32 @@ class LocationService {
     return '~${km.round()} km';
   }
 
-  Future<void> openAppSettings() => Geolocator.openAppSettings();
+  Future<void> openAppSettings() async {
+    if (AppConfig.demoMode) return;
+    try {
+      await Geolocator.openAppSettings();
+    } catch (e) {
+      debugPrint('openAppSettings error: $e');
+    }
+  }
 
-  Future<void> openLocationSettings() => Geolocator.openLocationSettings();
+  Future<void> openLocationSettings() async {
+    if (AppConfig.demoMode) return;
+    try {
+      await Geolocator.openLocationSettings();
+    } catch (e) {
+      debugPrint('openLocationSettings error: $e');
+    }
+  }
 
-  Future<bool> isServiceEnabled() => Geolocator.isLocationServiceEnabled();
+  Future<bool> isServiceEnabled() async {
+    if (AppConfig.demoMode) return true;
+    try {
+      return await Geolocator.isLocationServiceEnabled();
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 class LocationServiceException implements Exception {

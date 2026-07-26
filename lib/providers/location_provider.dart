@@ -63,6 +63,13 @@ class LocationState {
 class LocationController extends StateNotifier<LocationState> {
   LocationController(this._location, this._prefs, this._ref)
       : super(LocationState(
+          // Demo: Santiago altiro, sin loading ni GPS.
+          location: AppConfig.demoMode
+              ? LocationService.santiagoCenterApprox()
+              : null,
+          permission: AppConfig.demoMode
+              ? LocationPermissionStatus.granted
+              : LocationPermissionStatus.unknown,
           radiusMeters: _prefs.getDouble(AppConstants.keySearchRadius) ??
               SantiagoBounds.defaultSearchRadiusMeters,
         ));
@@ -71,48 +78,37 @@ class LocationController extends StateNotifier<LocationState> {
   final SharedPreferences _prefs;
   final Ref _ref;
 
-  /// Solo revisa permisos (sin GPS).
+  /// Solo revisa permisos (sin GPS). En demo: granted inmediato.
   Future<void> checkPermission() async {
+    if (AppConfig.demoMode) {
+      state = state.copyWith(
+        permission: LocationPermissionStatus.granted,
+        location: state.location ?? LocationService.santiagoCenterApprox(),
+        isLoading: false,
+        clearError: true,
+      );
+      return;
+    }
+
     final status = await _location.checkPermissionStatus();
     state = state.copyWith(permission: status);
   }
 
   /// Pide permiso + obtiene ubicación aproximada + opcionalmente sincroniza.
+  ///
+  /// En demo **nunca** llama a Geolocator: centro de Santiago altiro.
   Future<bool> refresh({bool updateFirestore = true}) async {
-    state = state.copyWith(isLoading: true, clearError: true);
-
-    // En demo, si no hay GPS usamos el centro de Santiago.
+    // ── Demo: instantáneo, sin GPS ──────────────────────────────────────
     if (AppConfig.demoMode) {
-      try {
-        final status = await _location.requestPermission();
-        if (status == LocationPermissionStatus.granted) {
-          final approx = await _location.getApproxLocation();
-          state = state.copyWith(
-            location: approx,
-            isLoading: false,
-            permission: LocationPermissionStatus.granted,
-            clearError: true,
-          );
-        } else {
-          _useSantiagoFallback();
-        }
-      } catch (_) {
-        _useSantiagoFallback();
-      }
-
+      _useSantiagoFallback();
       if (updateFirestore) {
-        final uid = _ref.read(authServiceProvider).currentUid;
-        final loc = state.location;
-        if (uid != null && loc != null) {
-          await _ref.read(userServiceProvider).updateLocation(
-                uid: uid,
-                latitude: loc.latitude,
-                longitude: loc.longitude,
-              );
-        }
+        await _syncLocationToProfile();
       }
       return true;
     }
+
+    // ── Producción ──────────────────────────────────────────────────────
+    state = state.copyWith(isLoading: true, clearError: true);
 
     try {
       final status = await _location.requestPermission();
@@ -137,17 +133,11 @@ class LocationController extends StateNotifier<LocationState> {
         location: approx,
         isLoading: false,
         permission: LocationPermissionStatus.granted,
+        clearError: true,
       );
 
       if (updateFirestore) {
-        final uid = _ref.read(authServiceProvider).currentUid;
-        if (uid != null) {
-          await _ref.read(userServiceProvider).updateLocation(
-                uid: uid,
-                latitude: approx.latitude,
-                longitude: approx.longitude,
-              );
-        }
+        await _syncLocationToProfile();
       }
       return true;
     } on LocationServiceException catch (e) {
@@ -166,11 +156,23 @@ class LocationController extends StateNotifier<LocationState> {
     }
   }
 
+  Future<void> _syncLocationToProfile() async {
+    final uid = _ref.read(authServiceProvider).currentUid;
+    final loc = state.location;
+    if (uid == null || loc == null) return;
+    try {
+      await _ref.read(userServiceProvider).updateLocation(
+            uid: uid,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+          );
+    } catch (_) {
+      // No bloquear la UI si el perfil no sincroniza.
+    }
+  }
+
   void _useSantiagoFallback() {
-    final approx = LocationService.fuzz(
-      latitude: SantiagoBounds.centerLatitude,
-      longitude: SantiagoBounds.centerLongitude,
-    );
+    final approx = LocationService.santiagoCenterApprox();
     state = state.copyWith(
       location: approx,
       isLoading: false,
@@ -187,13 +189,17 @@ class LocationController extends StateNotifier<LocationState> {
     }
   }
 
+  /// Persiste el radio de búsqueda (llamar al soltar el slider / debounce).
   Future<void> setRadius(double meters) async {
-    final clamped = meters.clamp(
-      SantiagoBounds.minSearchRadiusMeters,
-      SantiagoBounds.maxSearchRadiusMeters,
-    );
-    state = state.copyWith(radiusMeters: clamped.toDouble());
-    await _prefs.setDouble(AppConstants.keySearchRadius, clamped.toDouble());
+    final clamped = meters
+        .clamp(
+          SantiagoBounds.minSearchRadiusMeters,
+          SantiagoBounds.maxSearchRadiusMeters,
+        )
+        .toDouble();
+    if (state.radiusMeters == clamped) return;
+    state = state.copyWith(radiusMeters: clamped);
+    await _prefs.setDouble(AppConstants.keySearchRadius, clamped);
   }
 }
 

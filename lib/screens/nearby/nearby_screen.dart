@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/constants/santiago_bounds.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
@@ -12,12 +15,13 @@ import '../../providers/location_provider.dart';
 import '../../providers/nearby_provider.dart';
 import '../../router/app_router.dart';
 import '../../services/location_service.dart';
+import '../../widgets/nearby_map.dart';
 import '../../widgets/picaflor_card.dart';
 import '../../widgets/picaflor_empty_state.dart';
 import '../../widgets/picaflor_permission_dialog.dart';
 import '../../widgets/picaflor_skeleton.dart';
 
-/// Gente cerca — LocationService real + Firestore + demos de respaldo.
+/// Gente cerca — lista + mapa opcional (OSM).
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -28,14 +32,38 @@ class NearbyScreen extends ConsumerStatefulWidget {
 class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   bool _askedPermission = false;
 
+  /// 0 = lista, 1 = mapa.
+  int _viewMode = 0;
+
+  /// Valor del slider mientras se arrastra (feedback visual inmediato).
+  late double _sliderRadius;
+
+  /// Debounce al soltar / arrastrar para no invalidar nearby en cada tick.
+  Timer? _radiusDebounce;
+
   @override
   void initState() {
     super.initState();
+    final initial = ref.read(locationControllerProvider).radiusMeters;
+    _sliderRadius = initial;
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  @override
+  void dispose() {
+    _radiusDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
     final controller = ref.read(locationControllerProvider.notifier);
+
+    // Demo: sin diálogo de permisos ni GPS — Santiago altiro.
+    if (AppConfig.demoMode) {
+      await controller.refresh();
+      return;
+    }
+
     await controller.checkPermission();
     final state = ref.read(locationControllerProvider);
 
@@ -47,13 +75,17 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     if (!_askedPermission) {
       _askedPermission = true;
       if (!mounted) return;
-      // Pequeña pausa para que la UI asiente.
       await Future<void>.delayed(const Duration(milliseconds: 350));
       if (mounted) await _requestWithDialog();
     }
   }
 
   Future<void> _requestWithDialog() async {
+    if (AppConfig.demoMode) {
+      await ref.read(locationControllerProvider.notifier).refresh();
+      return;
+    }
+
     final location = ref.read(locationControllerProvider);
     final permanent = location.isPermanentlyDenied;
     final serviceOff = location.isServiceDisabled;
@@ -86,6 +118,26 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     ref.invalidate(nearbyUsersProvider);
   }
 
+  void _onRadiusChanged(double value) {
+    // Solo UI local: no toca Riverpod ni nearbyUsersProvider.
+    setState(() => _sliderRadius = value);
+  }
+
+  void _onRadiusChangeEnd(double value) {
+    Haptic.light();
+    _commitRadius(value);
+  }
+
+  void _commitRadius(double value) {
+    _radiusDebounce?.cancel();
+    _radiusDebounce = Timer(const Duration(milliseconds: 350), () async {
+      if (!mounted) return;
+      await ref.read(locationControllerProvider.notifier).setRadius(value);
+      // Invalidar solo después del debounce (el provider también relee radius).
+      ref.invalidate(nearbyUsersProvider);
+    });
+  }
+
   Future<void> _openChat(String otherUid) async {
     await Haptic.medium();
     final chat = await ref
@@ -113,6 +165,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     final me = ref.watch(currentUserProvider).valueOrNull;
     final firstName = me?.displayName.split(' ').first;
 
+    final centerLat =
+        location.location?.latitude ?? SantiagoBounds.centerLatitude;
+    final centerLon =
+        location.location?.longitude ?? SantiagoBounds.centerLongitude;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -122,18 +179,17 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
               title: firstName != null ? 'Hola, $firstName' : 'Cerca de ti',
               subtitle: 'Gente alrededor · zona aproximada',
               isRefreshing: location.isLoading,
+              viewMode: _viewMode,
+              onViewModeChanged: (mode) {
+                Haptic.selection();
+                setState(() => _viewMode = mode);
+              },
               onRefresh: _onRefresh,
             ),
             _RadiusCard(
-              radiusMeters: location.radiusMeters,
-              onChanged: (v) {
-                Haptic.selection();
-                ref.read(locationControllerProvider.notifier).setRadius(v);
-              },
-              onChangeEnd: (_) {
-                Haptic.light();
-                ref.invalidate(nearbyUsersProvider);
-              },
+              radiusMeters: _sliderRadius,
+              onChanged: _onRadiusChanged,
+              onChangeEnd: _onRadiusChangeEnd,
             ),
             nearby.when(
               data: (result) {
@@ -156,13 +212,23 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                 onAction: _requestWithDialog,
               ),
             Expanded(
-              child: _Body(
-                location: location,
-                nearby: nearby,
-                onRefresh: _onRefresh,
-                onRequestPermission: _requestWithDialog,
-                onOpenChat: _openChat,
-              ),
+              child: _viewMode == 0
+                  ? _ListBody(
+                      location: location,
+                      nearby: nearby,
+                      onRefresh: _onRefresh,
+                      onRequestPermission: _requestWithDialog,
+                      onOpenChat: _openChat,
+                    )
+                  : _MapBody(
+                      centerLat: centerLat,
+                      centerLon: centerLon,
+                      // Círculo visual sigue el slider altiro.
+                      displayRadiusMeters: _sliderRadius,
+                      nearby: nearby,
+                      onRefresh: _onRefresh,
+                      onOpenChat: _openChat,
+                    ),
             ),
           ],
         ),
@@ -176,12 +242,16 @@ class _Header extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.isRefreshing,
+    required this.viewMode,
+    required this.onViewModeChanged,
     required this.onRefresh,
   });
 
   final String title;
   final String subtitle;
   final bool isRefreshing;
+  final int viewMode;
+  final ValueChanged<int> onViewModeChanged;
   final Future<void> Function() onRefresh;
 
   @override
@@ -220,6 +290,50 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          // Toggle Lista / Mapa
+          SegmentedButton<int>(
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppColors.primary.withValues(alpha: 0.14);
+                }
+                return isDark ? AppColors.darkSurface : AppColors.lightSurface;
+              }),
+              foregroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppColors.primaryDark;
+                }
+                return isDark
+                    ? AppColors.darkTextSecondary
+                    : AppColors.lightTextSecondary;
+              }),
+              side: WidgetStatePropertyAll(
+                BorderSide(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+            ),
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(
+                value: 0,
+                icon: Icon(Icons.view_list_rounded, size: 18),
+                tooltip: 'Lista',
+              ),
+              ButtonSegment(
+                value: 1,
+                icon: Icon(Icons.map_rounded, size: 18),
+                tooltip: 'Mapa',
+              ),
+            ],
+            selected: {viewMode},
+            onSelectionChanged: (set) {
+              if (set.isNotEmpty) onViewModeChanged(set.first);
+            },
+          ),
+          const SizedBox(width: 4),
           IconButton(
             onPressed: isRefreshing ? null : () => onRefresh(),
             tooltip: 'Actualizar',
@@ -439,8 +553,8 @@ class _LocationBanner extends StatelessWidget {
   }
 }
 
-class _Body extends StatelessWidget {
-  const _Body({
+class _ListBody extends StatelessWidget {
+  const _ListBody({
     required this.location,
     required this.nearby,
     required this.onRefresh,
@@ -526,6 +640,57 @@ class _Body extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _MapBody extends StatelessWidget {
+  const _MapBody({
+    required this.centerLat,
+    required this.centerLon,
+    required this.displayRadiusMeters,
+    required this.nearby,
+    required this.onRefresh,
+    required this.onOpenChat,
+  });
+
+  final double centerLat;
+  final double centerLon;
+  final double displayRadiusMeters;
+  final AsyncValue<NearbyResult> nearby;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function(String otherUid) onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.pageX,
+        AppSpacing.xs,
+        AppSpacing.pageX,
+        AppSpacing.md,
+      ),
+      child: nearby.when(
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+        error: (_, __) => PicaflorEmptyState(
+          icon: Icons.map_outlined,
+          title: 'Mapa no disponible',
+          subtitle: 'Revisa tu conexión e inténtalo de nuevo.',
+          actionLabel: 'Reintentar',
+          onAction: onRefresh,
+        ),
+        data: (result) {
+          return NearbyMap(
+            centerLat: centerLat,
+            centerLon: centerLon,
+            radiusMeters: displayRadiusMeters,
+            people: result.people,
+            onPersonTap: (p) => onOpenChat(p.user.uid),
+          );
+        },
+      ),
     );
   }
 }
