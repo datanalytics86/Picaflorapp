@@ -119,22 +119,23 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   }
 
   void _onRadiusChanged(double value) {
-    // Solo UI local: no toca Riverpod ni nearbyUsersProvider.
+    // Solo UI local: NO toca Riverpod ni nearbyUsersProvider.
     setState(() => _sliderRadius = value);
   }
 
   void _onRadiusChangeEnd(double value) {
     Haptic.light();
+    // Un solo commit al soltar + debounce por si llegan eventos repetidos.
     _commitRadius(value);
   }
 
   void _commitRadius(double value) {
     _radiusDebounce?.cancel();
-    _radiusDebounce = Timer(const Duration(milliseconds: 350), () async {
+    _radiusDebounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      await ref.read(locationControllerProvider.notifier).setRadius(value);
-      // Invalidar solo después del debounce (el provider también relee radius).
-      ref.invalidate(nearbyUsersProvider);
+      // setRadius actualiza locationController → nearby reacciona por select(radius).
+      // No hace falta invalidate extra (evita double-fetch).
+      ref.read(locationControllerProvider.notifier).setRadius(value);
     });
   }
 
@@ -682,7 +683,7 @@ class _MapBody extends StatelessWidget {
           onAction: onRefresh,
         ),
         data: (result) {
-          return NearbyMap(
+          return NearbyMapView(
             centerLat: centerLat,
             centerLon: centerLon,
             radiusMeters: displayRadiusMeters,

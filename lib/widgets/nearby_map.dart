@@ -7,9 +7,12 @@ import '../core/theme/app_spacing.dart';
 import '../services/location_service.dart';
 import '../services/user_service.dart';
 
-/// Mapa Nearby con tiles OSM: radio, yo (approx) y gente cerca (fuzzed).
-class NearbyMap extends StatefulWidget {
-  const NearbyMap({
+/// Mapa Nearby: radio, yo (approx) y gente cerca (fuzzed).
+///
+/// Tiles Carto (compatible con OSM data, sin API key; más estable en web
+/// que tile.openstreetmap.org que a veces bloquea por User-Agent).
+class NearbyMapView extends StatefulWidget {
+  const NearbyMapView({
     super.key,
     required this.centerLat,
     required this.centerLon,
@@ -25,10 +28,13 @@ class NearbyMap extends StatefulWidget {
   final void Function(NearbyUser person)? onPersonTap;
 
   @override
-  State<NearbyMap> createState() => _NearbyMapState();
+  State<NearbyMapView> createState() => _NearbyMapViewState();
 }
 
-class _NearbyMapState extends State<NearbyMap> {
+/// Alias de compatibilidad.
+typedef NearbyMap = NearbyMapView;
+
+class _NearbyMapViewState extends State<NearbyMapView> {
   final _mapController = MapController();
 
   LatLng get _center => LatLng(widget.centerLat, widget.centerLon);
@@ -43,7 +49,7 @@ class _NearbyMapState extends State<NearbyMap> {
   }
 
   @override
-  void didUpdateWidget(covariant NearbyMap oldWidget) {
+  void didUpdateWidget(covariant NearbyMapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     final centerChanged =
         oldWidget.centerLat != widget.centerLat ||

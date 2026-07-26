@@ -123,7 +123,9 @@ class LocationController extends StateNotifier<LocationState> {
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
-      final status = await _location.requestPermission();
+      final status = await _location.requestPermission().timeout(
+        const Duration(seconds: 10),
+      );
       state = state.copyWith(permission: status);
 
       if (status != LocationPermissionStatus.granted) {
@@ -140,7 +142,10 @@ class LocationController extends StateNotifier<LocationState> {
         return false;
       }
 
-      final approx = await _location.getApproxLocation();
+      // Safety net: nunca dejar isLoading=true si GPS cuelga.
+      final approx = await _location.getApproxLocation().timeout(
+        const Duration(seconds: 12),
+      );
       state = state.copyWith(
         location: approx,
         isLoading: false,
@@ -149,9 +154,15 @@ class LocationController extends StateNotifier<LocationState> {
       );
 
       if (updateFirestore) {
-        await _syncLocationToProfile();
+        unawaited(_syncLocationToProfile());
       }
       return true;
+    } on TimeoutException {
+      state = state.copyWith(
+        isLoading: false,
+        error: 'La ubicación tardó demasiado. Inténtalo de nuevo.',
+      );
+      return false;
     } on LocationServiceException catch (e) {
       state = state.copyWith(
         isLoading: false,

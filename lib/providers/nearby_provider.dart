@@ -25,28 +25,39 @@ class NearbyResult {
 }
 
 /// Personas cercanas (Firestore o catálogo demo).
+///
+/// Solo reacciona a lat/lon/radius — no a flips de isLoading del GPS.
 final nearbyUsersProvider =
     FutureProvider.autoDispose<NearbyResult>((ref) async {
-  final location = ref.watch(locationControllerProvider);
+  final lat = ref.watch(
+    locationControllerProvider.select(
+      (s) => s.location?.latitude ?? SantiagoBounds.centerLatitude,
+    ),
+  );
+  final lon = ref.watch(
+    locationControllerProvider.select(
+      (s) => s.location?.longitude ?? SantiagoBounds.centerLongitude,
+    ),
+  );
+  final radius = ref.watch(
+    locationControllerProvider.select((s) => s.radiusMeters),
+  );
   final uid = ref.watch(authServiceProvider).currentUid ?? 'local';
 
-  final lat = location.location?.latitude ?? SantiagoBounds.centerLatitude;
-  final lon = location.location?.longitude ?? SantiagoBounds.centerLongitude;
-  final radius = location.radiusMeters;
-
-  // Modo demo: siempre personas de ejemplo (filtradas por radio).
+  // Demo: 100% síncrono, sin red ni Geolocator.
   if (AppConfig.demoMode) {
-    final people = await ref.watch(userServiceProvider).getNearbyUsers(
-          currentUid: uid,
-          latitude: lat,
-          longitude: lon,
-          radiusMeters: radius,
-        );
+    final people = DemoNearby.people(originLat: lat, originLon: lon)
+        .where((p) => p.user.uid != uid)
+        .where((p) => p.distanceMeters <= radius)
+        .toList();
     return NearbyResult(people: people, isDemo: true);
   }
 
   // Sin ubicación real aún: demos del centro de Stgo.
-  if (!location.hasLocation) {
+  final hasLocation = ref.watch(
+    locationControllerProvider.select((s) => s.hasLocation),
+  );
+  if (!hasLocation) {
     return NearbyResult(
       people: DemoNearby.people(originLat: lat, originLon: lon)
           .where((p) => p.distanceMeters <= radius)
@@ -56,7 +67,7 @@ final nearbyUsersProvider =
   }
 
   try {
-    final people = await ref.watch(userServiceProvider).getNearbyUsers(
+    final people = await ref.read(userServiceProvider).getNearbyUsers(
           currentUid: uid,
           latitude: lat,
           longitude: lon,
@@ -71,7 +82,7 @@ final nearbyUsersProvider =
     }
 
     return NearbyResult(people: people, isDemo: false);
-  } catch (e) {
+  } catch (_) {
     final demo = DemoNearby.people(originLat: lat, originLon: lon)
         .where((p) => p.distanceMeters <= radius)
         .toList();
