@@ -39,7 +39,8 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
 class RouterRefreshNotifier extends ChangeNotifier {
   RouterRefreshNotifier(Ref ref) {
-    _authSub = ref.listen(authStateProvider, (_, __) => notifyListeners());
+    // Sesión síncrona (StateNotifier) — sin races ni timeouts.
+    _authSub = ref.listen(sessionProvider, (_, __) => notifyListeners());
     _onboardingSub =
         ref.listen(onboardingDoneProvider, (_, __) => notifyListeners());
   }
@@ -65,17 +66,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     debugLogDiagnostics: false,
     redirect: (context, state) {
-      final authAsync = ref.read(authStateProvider);
+      final session = ref.read(sessionProvider);
       final onboardingDone = ref.read(onboardingDoneProvider);
       final loc = state.matchedLocation;
 
       final isSplash = loc == AppRoutes.splash || loc == '/';
       final isOnboarding = loc == AppRoutes.onboarding;
       final isLogin = loc == AppRoutes.login;
-
-      // NUNCA atrapar al usuario en splash por un StreamProvider loading eterno.
-      // Si aún no hay valor, tratamos como "sin sesión" y seguimos el flujo.
-      final isLoggedIn = authAsync.hasValue && authAsync.requireValue != null;
+      final isLoggedIn = session != null;
 
       // Onboarding pendiente.
       if (!onboardingDone) {
@@ -83,10 +81,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         return AppRoutes.onboarding;
       }
 
-      // Sin sesión → login (salvo que ya esté ahí).
+      // Sin sesión → login.
       if (!isLoggedIn) {
         if (isLogin) return null;
         if (isSplash) return AppRoutes.login;
+        // Cualquier ruta protegida (home, chat, etc.) → login.
         return AppRoutes.login;
       }
 

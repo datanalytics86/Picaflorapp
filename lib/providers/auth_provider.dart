@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/auth_session.dart';
@@ -9,26 +11,53 @@ final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService(userService: ref.watch(userServiceProvider));
 });
 
-/// Sesión autenticada (demo o Firebase), desacoplada de `firebase_auth.User`.
+/// Sesión síncrona — fuente de verdad para el router.
 ///
-/// Timeout de seguridad: si el stream no emite en 1.5s, asume sin sesión
-/// (evita splash infinito en web).
-final authStateProvider = StreamProvider<AuthSession?>((ref) {
-  try {
-    return ref.watch(authServiceProvider).authStateChanges.timeout(
-      const Duration(milliseconds: 1500),
-      onTimeout: (sink) {
-        sink.add(null);
-      },
-    );
-  } catch (_) {
-    return Stream.value(null);
+/// Evita:
+/// 1) Stream.timeout que re-emite `null` y te “desloguea”
+/// 2) Race entre `context.go(/home)` y el StreamProvider
+class SessionNotifier extends StateNotifier<AuthSession?> {
+  SessionNotifier(this._auth) : super(_auth.currentSession) {
+    _sub = _auth.authStateChanges.listen((session) {
+      // Solo actualizar si cambió (evita rebuilds innecesarios).
+      if (state != session) {
+        state = session;
+      }
+    });
   }
+
+  final AuthService _auth;
+  StreamSubscription<AuthSession?>? _sub;
+
+  /// Fuerza lectura síncrona desde AuthService/DemoStore.
+  void sync() {
+    state = _auth.currentSession;
+  }
+
+  void setSession(AuthSession? session) {
+    state = session;
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+}
+
+final sessionProvider =
+    StateNotifierProvider<SessionNotifier, AuthSession?>((ref) {
+  return SessionNotifier(ref.watch(authServiceProvider));
+});
+
+/// Compat AsyncValue para código que esperaba StreamProvider.
+final authStateProvider = Provider<AsyncValue<AuthSession?>>((ref) {
+  return AsyncValue.data(ref.watch(sessionProvider));
 });
 
 /// Perfil del usuario autenticado (DemoStore o Firestore).
 final currentUserProvider = StreamProvider<UserModel?>((ref) {
-  final session = ref.watch(authStateProvider).valueOrNull;
+  final session = ref.watch(sessionProvider);
   if (session == null) return Stream.value(null);
   return ref.watch(userServiceProvider).watchUser(session.uid);
 });
@@ -78,9 +107,12 @@ class AuthFormState {
 enum PhoneAuthStep { idle, codeSent, verifying }
 
 class AuthController extends StateNotifier<AuthFormState> {
-  AuthController(this._auth) : super(const AuthFormState());
+  AuthController(this._auth, this._session) : super(const AuthFormState());
 
   final AuthService _auth;
+  final SessionNotifier _session;
+
+  void _syncSession() => _session.sync();
 
   void toggleMode() {
     state = state.copyWith(
@@ -106,6 +138,7 @@ class AuthController extends StateNotifier<AuthFormState> {
     );
     try {
       await _auth.signInWithEmail(email: email, password: password);
+      _syncSession();
       state = state.copyWith(isLoading: false);
       return true;
     } on AuthException catch (e) {
@@ -136,6 +169,7 @@ class AuthController extends StateNotifier<AuthFormState> {
         password: password,
         displayName: displayName,
       );
+      _syncSession();
       state = state.copyWith(isLoading: false);
       return true;
     } on AuthException catch (e) {
@@ -158,6 +192,7 @@ class AuthController extends StateNotifier<AuthFormState> {
     );
     try {
       await _auth.signInWithGoogle();
+      _syncSession();
       state = state.copyWith(isLoading: false);
       return true;
     } on AuthException catch (e) {
@@ -180,6 +215,7 @@ class AuthController extends StateNotifier<AuthFormState> {
     );
     try {
       await _auth.signInWithApple();
+      _syncSession();
       state = state.copyWith(isLoading: false);
       return true;
     } on AuthException catch (e) {
@@ -194,10 +230,6 @@ class AuthController extends StateNotifier<AuthFormState> {
     }
   }
 
-  /// Paso 1 teléfono: envía SMS.
-  ///
-  /// Retorna `true` si hay que mostrar el input de código,
-  /// o si Android auto-verificó (sesión lista).
   Future<bool> sendPhoneCode(String phone) async {
     state = state.copyWith(
       isLoading: true,
@@ -208,6 +240,7 @@ class AuthController extends StateNotifier<AuthFormState> {
       final result = await _auth.sendPhoneCode(phoneNumber: phone);
 
       if (result.isAutoVerified) {
+        _syncSession();
         state = state.copyWith(isLoading: false, clearPhone: true);
         return true;
       }
@@ -230,7 +263,6 @@ class AuthController extends StateNotifier<AuthFormState> {
     }
   }
 
-  /// Paso 2 teléfono: confirma código.
   Future<bool> confirmPhoneCode({
     required String smsCode,
     String? displayName,
@@ -247,6 +279,7 @@ class AuthController extends StateNotifier<AuthFormState> {
         verificationId: state.phoneVerificationId,
         displayName: displayName,
       );
+      _syncSession();
       state = state.copyWith(
         isLoading: false,
         clearPhone: true,
@@ -278,6 +311,8 @@ class AuthController extends StateNotifier<AuthFormState> {
     );
     try {
       await _auth.signInAsDemoGuest();
+      // Crítico: actualizar sesión ANTES de que el UI haga go(/home).
+      _syncSession();
       state = state.copyWith(isLoading: false);
       return true;
     } on AuthException catch (e) {
@@ -296,6 +331,7 @@ class AuthController extends StateNotifier<AuthFormState> {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       await _auth.signOut();
+      _syncSession();
     } finally {
       state = state.copyWith(isLoading: false, clearPhone: true);
     }
@@ -313,7 +349,10 @@ class AuthController extends StateNotifier<AuthFormState> {
 
 final authControllerProvider =
     StateNotifierProvider<AuthController, AuthFormState>((ref) {
-  return AuthController(ref.watch(authServiceProvider));
+  return AuthController(
+    ref.watch(authServiceProvider),
+    ref.watch(sessionProvider.notifier),
+  );
 });
 
 final appleSignInAvailableProvider = FutureProvider<bool>((ref) {

@@ -46,21 +46,27 @@ class AuthService {
 
   Stream<AuthSession?> get authStateChanges {
     if (_isDemo) return DemoStore.instance.authStateChanges;
-    return _auth!.authStateChanges().map(
-          (u) => u == null
-              ? null
-              : AuthSession(
-                  uid: u.uid,
-                  email: u.email ?? '',
-                  displayName: u.displayName ?? '',
-                ),
-        );
+    return _auth!.authStateChanges().map(_sessionFromFirebaseUser);
   }
 
-  String? get currentUid =>
-      _isDemo ? DemoStore.instance.currentUid : _auth?.currentUser?.uid;
+  /// Lectura síncrona de la sesión (para el router, sin race con streams).
+  AuthSession? get currentSession {
+    if (_isDemo) return DemoStore.instance.session;
+    return _sessionFromFirebaseUser(_auth?.currentUser);
+  }
+
+  String? get currentUid => currentSession?.uid;
 
   bool get isSignedIn => currentUid != null;
+
+  AuthSession? _sessionFromFirebaseUser(User? u) {
+    if (u == null) return null;
+    return AuthSession(
+      uid: u.uid,
+      email: u.email ?? '',
+      displayName: u.displayName ?? '',
+    );
+  }
 
   String? get pendingPhoneVerificationId => _pendingPhoneVerificationId;
 
