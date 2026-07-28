@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_colors.dart';
@@ -5,7 +6,7 @@ import '../core/theme/app_spacing.dart';
 
 export 'picaflor_person_card.dart';
 
-/// Contenedor genérico con estilo card Picaflor.
+/// Superficie card Picaflor — borde fino + sombra soft (también en web).
 class PicaflorSurface extends StatelessWidget {
   const PicaflorSurface({
     super.key,
@@ -13,12 +14,14 @@ class PicaflorSurface extends StatelessWidget {
     this.padding = const EdgeInsets.all(AppSpacing.md),
     this.onTap,
     this.margin,
+    this.elevated = true,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry? margin;
+  final bool elevated;
 
   @override
   Widget build(BuildContext context) {
@@ -31,8 +34,10 @@ class PicaflorSurface extends StatelessWidget {
         color: isDark ? AppColors.darkCard : AppColors.lightCard,
         borderRadius: AppSpacing.cardRadius,
         border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          color: AppColors.cardBorder(isDark: isDark),
         ),
+        boxShadow:
+            elevated ? AppShadows.card(isDark, web: kIsWeb) : null,
       ),
       child: child,
     );

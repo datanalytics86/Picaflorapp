@@ -1,12 +1,4 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
-
-import 'package:crypto/crypto.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../core/config/app_config.dart';
 import '../core/constants/app_constants.dart';
@@ -15,62 +7,68 @@ import '../models/auth_session.dart';
 import '../models/user_model.dart';
 import 'user_service.dart';
 
-/// Autenticación: email, Google, Apple y teléfono.
+// Firebase Auth / Google / Apple SOLO fuera de DEMO.
+import 'auth_service_live.dart' deferred as live;
+
+/// Autenticación.
 ///
-/// En [AppConfig.demoMode] no toca Firebase: sesión local vía [DemoStore].
+/// **DEMO_MODE:** 100% [DemoStore], sin firebase_auth / google_sign_in.
 class AuthService {
   AuthService({
-    FirebaseAuth? auth,
-    GoogleSignIn? googleSignIn,
     UserService? userService,
     bool? demoMode,
   })  : _isDemo = demoMode ?? AppConfig.demoMode,
-        _userService = userService ?? UserService() {
-    if (!_isDemo) {
-      _auth = auth ?? FirebaseAuth.instance;
-      _googleSignIn = googleSignIn ?? GoogleSignIn(scopes: const ['email']);
-    }
-  }
+        _userService = userService ?? UserService();
 
   final bool _isDemo;
   final UserService _userService;
-
-  FirebaseAuth? _auth;
-  GoogleSignIn? _googleSignIn;
-
-  /// VerificationId pendiente de SMS (flujo teléfono · producción).
+  bool _liveLoaded = false;
   String? _pendingPhoneVerificationId;
 
-  /// En demo el código "SMS" simulado.
   static const String demoSmsCode = '123456';
+
+  Future<void> _ensureLive() async {
+    if (_isDemo) throw StateError('Auth live no se carga en DEMO');
+    if (_liveLoaded) return;
+    if (kDebugMode) debugPrint('🔐 loading auth_service_live…');
+    await live.loadLibrary().timeout(const Duration(seconds: 6));
+    _liveLoaded = true;
+  }
 
   Stream<AuthSession?> get authStateChanges {
     if (_isDemo) return DemoStore.instance.authStateChanges;
-    return _auth!.authStateChanges().map(_sessionFromFirebaseUser);
+    return Stream.multi((listener) async {
+      try {
+        await _ensureLive();
+        final sub = live.authStateChanges().listen(
+          listener.add,
+          onError: listener.addError,
+          onDone: listener.close,
+        );
+        listener.onCancel = () => sub.cancel();
+      } catch (e) {
+        listener.add(null);
+        listener.close();
+      }
+    });
   }
 
-  /// Lectura síncrona de la sesión (para el router, sin race con streams).
   AuthSession? get currentSession {
     if (_isDemo) return DemoStore.instance.session;
-    return _sessionFromFirebaseUser(_auth?.currentUser);
+    // Lectura síncrona solo si live ya cargó; si no, null (router espera login).
+    if (!_liveLoaded) return null;
+    try {
+      return live.currentSessionSync();
+    } catch (_) {
+      return null;
+    }
   }
 
   String? get currentUid => currentSession?.uid;
 
   bool get isSignedIn => currentUid != null;
 
-  AuthSession? _sessionFromFirebaseUser(User? u) {
-    if (u == null) return null;
-    return AuthSession(
-      uid: u.uid,
-      email: u.email ?? '',
-      displayName: u.displayName ?? '',
-    );
-  }
-
   String? get pendingPhoneVerificationId => _pendingPhoneVerificationId;
-
-  // ── Email ──────────────────────────────────────────────────────────────
 
   Future<UserModel> signUpWithEmail({
     required String email,
@@ -90,30 +88,13 @@ class AuthService {
       );
     }
 
-    try {
-      final credential = await _auth!.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-      final user = credential.user;
-      if (user == null) {
-        throw AuthException('No se pudo crear la cuenta. Inténtalo de nuevo.');
-      }
-
-      await user.updateDisplayName(displayName.trim());
-      return _upsertProfile(
-        uid: user.uid,
-        email: email.trim().toLowerCase(),
-        displayName: displayName.trim(),
-        photoUrl: user.photoURL,
-      );
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } catch (e) {
-      if (e is AuthException) rethrow;
-      debugPrint('signUpWithEmail error: $e');
-      throw AuthException('Algo salió mal al registrarte. Inténtalo otra vez.');
-    }
+    await _ensureLive();
+    return live.signUpWithEmail(
+      email: email,
+      password: password,
+      displayName: displayName,
+      userService: _userService,
+    );
   }
 
   Future<UserModel> signInWithEmail({
@@ -125,7 +106,6 @@ class AuthService {
     }
 
     if (_isDemo) {
-      // Cualquier correo/clave válida en formato abre la sesión demo.
       if (!_isValidEmail(email) || password.length < 6) {
         throw AuthException('Correo o contraseña incorrectos.');
       }
@@ -135,38 +115,22 @@ class AuthService {
       );
     }
 
-    try {
-      final credential = await _auth!.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-      final user = credential.user;
-      if (user == null) throw AuthException('No se pudo iniciar sesión.');
-
-      return _upsertProfile(
-        uid: user.uid,
-        email: user.email ?? email.trim().toLowerCase(),
-        displayName: user.displayName ?? 'Usuario',
-        photoUrl: user.photoURL,
-      );
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } catch (e) {
-      if (e is AuthException) rethrow;
-      debugPrint('signInWithEmail error: $e');
-      throw AuthException('No pudimos iniciar sesión. Revisa tu conexión.');
-    }
+    await _ensureLive();
+    return live.signInWithEmail(
+      email: email,
+      password: password,
+      userService: _userService,
+    );
   }
 
-  /// Entrada rápida al modo demo (un toque).
+  /// Entrada demo — síncrona (Future.value inmediato).
   Future<UserModel> signInAsDemoGuest() async {
     if (!_isDemo) {
       throw AuthException('El modo demo no está activo.');
     }
+    // Sin await artificial: devuelve altiro.
     return DemoStore.instance.signInDemo();
   }
-
-  // ── Google ─────────────────────────────────────────────────────────────
 
   Future<UserModel> signInWithGoogle() async {
     if (_isDemo) {
@@ -175,42 +139,9 @@ class AuthService {
         displayName: 'Demo Google',
       );
     }
-
-    try {
-      final googleUser = await _googleSignIn!.signIn();
-      if (googleUser == null) {
-        throw AuthException('Cancelaste el inicio con Google.');
-      }
-
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final userCredential = await _auth!.signInWithCredential(credential);
-      final user = userCredential.user;
-      if (user == null) {
-        throw AuthException('No se pudo entrar con Google.');
-      }
-
-      return _upsertProfile(
-        uid: user.uid,
-        email: user.email ?? googleUser.email,
-        displayName: user.displayName ?? googleUser.displayName ?? 'Usuario',
-        photoUrl: user.photoURL ?? googleUser.photoUrl,
-      );
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } on AuthException {
-      rethrow;
-    } catch (e) {
-      debugPrint('signInWithGoogle error: $e');
-      throw AuthException('Falló el inicio con Google. Inténtalo de nuevo.');
-    }
+    await _ensureLive();
+    return live.signInWithGoogle(userService: _userService);
   }
-
-  // ── Apple ──────────────────────────────────────────────────────────────
 
   Future<UserModel> signInWithApple() async {
     if (_isDemo) {
@@ -219,83 +150,19 @@ class AuthService {
         displayName: 'Demo Apple',
       );
     }
-
-    try {
-      final rawNonce = _generateNonce();
-      final nonce = _sha256ofString(rawNonce);
-
-      final appleCredential = await SignInWithApple.getAppleIDCredential(
-        scopes: [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-        nonce: nonce,
-      );
-
-      final idToken = appleCredential.identityToken;
-      if (idToken == null) {
-        throw AuthException('Apple no devolvió el token. Inténtalo de nuevo.');
-      }
-
-      final oauth = OAuthProvider('apple.com').credential(
-        idToken: idToken,
-        rawNonce: rawNonce,
-        accessToken: appleCredential.authorizationCode,
-      );
-
-      final userCredential = await _auth!.signInWithCredential(oauth);
-      final user = userCredential.user;
-      if (user == null) {
-        throw AuthException('No se pudo entrar con Apple.');
-      }
-
-      final given = appleCredential.givenName;
-      final family = appleCredential.familyName;
-      final composedName = [
-        if (given != null && given.isNotEmpty) given,
-        if (family != null && family.isNotEmpty) family,
-      ].join(' ');
-
-      final displayName = (user.displayName != null &&
-              user.displayName!.trim().isNotEmpty)
-          ? user.displayName!
-          : (composedName.isNotEmpty ? composedName : 'Usuario');
-
-      if (user.displayName == null && composedName.isNotEmpty) {
-        await user.updateDisplayName(composedName);
-      }
-
-      return _upsertProfile(
-        uid: user.uid,
-        email: user.email ?? appleCredential.email ?? '',
-        displayName: displayName,
-        photoUrl: user.photoURL,
-      );
-    } on SignInWithAppleAuthorizationException catch (e) {
-      if (e.code == AuthorizationErrorCode.canceled) {
-        throw AuthException('Cancelaste el inicio con Apple.');
-      }
-      throw AuthException('No se pudo entrar con Apple.');
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } on AuthException {
-      rethrow;
-    } catch (e) {
-      debugPrint('signInWithApple error: $e');
-      throw AuthException('Falló el inicio con Apple. Inténtalo de nuevo.');
-    }
+    await _ensureLive();
+    return live.signInWithApple(userService: _userService);
   }
 
   Future<bool> get isAppleSignInAvailable async {
     if (_isDemo) return true;
     try {
-      return await SignInWithApple.isAvailable();
+      await _ensureLive();
+      return await live.isAppleSignInAvailable();
     } catch (_) {
       return false;
     }
   }
-
-  // ── Teléfono ───────────────────────────────────────────────────────────
 
   Future<PhoneCodeResult> sendPhoneCode({
     required String phoneNumber,
@@ -309,67 +176,19 @@ class AuthService {
     }
 
     if (_isDemo) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      // Sin delay artificial (antes 400ms se sentía como freeze).
       _pendingPhoneVerificationId = 'demo_vid_$normalized';
       return PhoneCodeResult.codeSent(_pendingPhoneVerificationId!);
     }
 
-    final completer = Completer<PhoneCodeResult>();
-
-    try {
-      await _auth!.verifyPhoneNumber(
-        phoneNumber: normalized,
-        timeout: timeout,
-        verificationCompleted: (credential) async {
-          try {
-            final profile = await _signInWithPhoneCredential(credential);
-            if (!completer.isCompleted) {
-              completer.complete(PhoneCodeResult.autoVerified(profile));
-            }
-          } catch (e) {
-            debugPrint('auto phone verify error: $e');
-            if (!completer.isCompleted) {
-              completer.completeError(
-                AuthException(
-                  'No se pudo verificar el teléfono automáticamente.',
-                ),
-              );
-            }
-          }
-        },
-        verificationFailed: (e) {
-          if (!completer.isCompleted) {
-            completer.completeError(AuthException(_mapFirebaseError(e)));
-          }
-        },
-        codeSent: (verificationId, _) {
-          _pendingPhoneVerificationId = verificationId;
-          if (!completer.isCompleted) {
-            completer.complete(PhoneCodeResult.codeSent(verificationId));
-          }
-        },
-        codeAutoRetrievalTimeout: (verificationId) {
-          _pendingPhoneVerificationId = verificationId;
-        },
-      );
-
-      return await completer.future.timeout(
-        timeout + const Duration(seconds: 5),
-        onTimeout: () {
-          throw AuthException(
-            'Se demoró mucho el SMS. Revisa el número e inténtalo de nuevo.',
-          );
-        },
-      );
-    } on AuthException {
-      rethrow;
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } catch (e) {
-      if (e is AuthException) rethrow;
-      debugPrint('sendPhoneCode error: $e');
-      throw AuthException('No pudimos enviar el SMS. Inténtalo de nuevo.');
-    }
+    await _ensureLive();
+    final result = await live.sendPhoneCode(
+      phoneNumber: normalized,
+      timeout: timeout,
+      userService: _userService,
+    );
+    _pendingPhoneVerificationId = result.verificationId;
+    return result;
   }
 
   Future<UserModel> confirmPhoneCode({
@@ -397,53 +216,14 @@ class AuthService {
       );
     }
 
-    try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: vid,
-        smsCode: smsCode.trim(),
-      );
-      return _signInWithPhoneCredential(
-        credential,
-        displayName: displayName,
-      );
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    } catch (e) {
-      if (e is AuthException) rethrow;
-      debugPrint('confirmPhoneCode error: $e');
-      throw AuthException('Código incorrecto o expirado.');
-    }
-  }
-
-  Future<UserModel> _signInWithPhoneCredential(
-    PhoneAuthCredential credential, {
-    String? displayName,
-  }) async {
-    final userCredential = await _auth!.signInWithCredential(credential);
-    final user = userCredential.user;
-    if (user == null) {
-      throw AuthException('No se pudo verificar el teléfono.');
-    }
-
-    final name = (displayName != null && displayName.trim().isNotEmpty)
-        ? displayName.trim()
-        : (user.displayName?.trim().isNotEmpty == true
-            ? user.displayName!
-            : 'Usuario');
-
-    if (user.displayName == null || user.displayName!.isEmpty) {
-      await user.updateDisplayName(name);
-    }
-
-    return _upsertProfile(
-      uid: user.uid,
-      email: user.email ?? '',
-      displayName: name,
-      photoUrl: user.photoURL,
+    await _ensureLive();
+    return live.confirmPhoneCode(
+      smsCode: smsCode,
+      verificationId: vid,
+      displayName: displayName,
+      userService: _userService,
     );
   }
-
-  // ── Sesión ─────────────────────────────────────────────────────────────
 
   Future<void> signOut() async {
     final uid = currentUid;
@@ -460,58 +240,18 @@ class AuthService {
       return;
     }
 
-    await Future.wait([
-      _auth!.signOut(),
-      _googleSignIn!.signOut(),
-    ]);
+    if (_liveLoaded) {
+      await live.signOut();
+    }
   }
 
   Future<void> sendPasswordReset(String email) async {
     if (email.trim().isEmpty) {
       throw AuthException('Escribe tu correo para enviarte el enlace.');
     }
-    if (_isDemo) {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      return;
-    }
-    try {
-      await _auth!.sendPasswordResetEmail(email: email.trim());
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_mapFirebaseError(e));
-    }
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────────
-
-  Future<UserModel> _upsertProfile({
-    required String uid,
-    required String email,
-    required String displayName,
-    String? photoUrl,
-  }) async {
-    final existing = await _userService.getUser(uid);
-    if (existing != null) {
-      await _userService.setOnlineStatus(uid, true);
-      if ((existing.displayName.isEmpty || existing.displayName == 'Usuario') &&
-          displayName.isNotEmpty &&
-          displayName != 'Usuario') {
-        await _userService.updateProfile(uid: uid, displayName: displayName);
-      }
-      if ((existing.photoUrl == null || existing.photoUrl!.isEmpty) &&
-          photoUrl != null) {
-        await _userService.updateProfile(uid: uid, photoUrl: photoUrl);
-      }
-      return (await _userService.getUser(uid)) ?? existing;
-    }
-
-    final profile = UserModel(
-      uid: uid,
-      email: email,
-      displayName: displayName,
-      photoUrl: photoUrl,
-    );
-    await _userService.createUser(profile);
-    return profile;
+    if (_isDemo) return;
+    await _ensureLive();
+    await live.sendPasswordReset(email);
   }
 
   String? _normalizeChilePhone(String raw) {
@@ -546,57 +286,6 @@ class AuthService {
 
   bool _isValidEmail(String email) {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
-  }
-
-  String _generateNonce([int length = 32]) {
-    const charset =
-        '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
-    final random = Random.secure();
-    return List.generate(length, (_) => charset[random.nextInt(charset.length)])
-        .join();
-  }
-
-  String _sha256ofString(String input) {
-    final bytes = utf8.encode(input);
-    final digest = sha256.convert(bytes);
-    return digest.toString();
-  }
-
-  String _mapFirebaseError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'email-already-in-use':
-        return 'Ese correo ya está registrado. Prueba iniciando sesión.';
-      case 'invalid-email':
-        return 'El correo no es válido.';
-      case 'weak-password':
-        return 'Esa contraseña es muy débil. Prueba con una más larga.';
-      case 'user-not-found':
-      case 'wrong-password':
-      case 'invalid-credential':
-        return 'Correo o contraseña incorrectos.';
-      case 'user-disabled':
-        return 'Esta cuenta está deshabilitada.';
-      case 'too-many-requests':
-        return 'Demasiados intentos. Espera un rato.';
-      case 'network-request-failed':
-        return 'Sin conexión. Revisa tu internet.';
-      case 'operation-not-allowed':
-        return 'Este método de acceso no está habilitado.';
-      case 'invalid-verification-code':
-        return 'Código incorrecto. Revisa el SMS.';
-      case 'invalid-verification-id':
-        return 'El código expiró. Pide uno nuevo.';
-      case 'session-expired':
-        return 'La sesión del SMS expiró. Pide otro código.';
-      case 'invalid-phone-number':
-        return 'Número de teléfono inválido.';
-      case 'quota-exceeded':
-        return 'Límite de SMS alcanzado. Prueba más tarde.';
-      case 'account-exists-with-different-credential':
-        return 'Ya tienes cuenta con otro método. Prueba Google o correo.';
-      default:
-        return e.message ?? 'Error de autenticación. Inténtalo de nuevo.';
-    }
   }
 }
 

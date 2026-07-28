@@ -74,14 +74,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               return const Center(child: Text('Sin sesión'));
             }
 
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.pageX,
-                AppSpacing.md,
-                AppSpacing.pageX,
-                AppSpacing.xxl,
-              ),
-              children: [
+            final px = AppLayout.pageX(context);
+            final wide = AppLayout.isWide(context);
+
+            return Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: AppLayout.contentMax),
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    px,
+                    wide ? 28 : 20,
+                    px,
+                    AppSpacing.xxl,
+                  ),
+                  children: [
                 Row(
                   children: [
                     Expanded(
@@ -89,6 +97,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         'Perfil',
                         style: theme.textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                          fontSize: wide ? 26 : 22,
                         ),
                       ),
                     ),
@@ -107,7 +117,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   child: PicaflorAvatar(
                     photoUrl: user.photoUrl,
                     displayName: user.displayName,
-                    size: 96,
+                    size: wide ? 108 : 96,
                     isOnline: user.isOnline,
                     showBorder: true,
                   ),
@@ -119,6 +129,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
+                      letterSpacing: -0.35,
                     ),
                   ),
                   if (user.email.isNotEmpty) ...[
@@ -138,7 +149,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Text(
                       user.bio,
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyLarge,
+                      style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
                     ),
                   ],
                   if (user.interests.isNotEmpty) ...[
@@ -149,14 +160,30 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       alignment: WrapAlignment.center,
                       children: user.interests
                           .map(
-                            (i) => Chip(
-                              label: Text(i),
-                              backgroundColor: isDark
-                                  ? AppColors.darkSurfaceElevated
-                                  : AppColors.primarySoft,
-                              side: BorderSide.none,
-                              labelStyle: theme.textTheme.labelMedium?.copyWith(
-                                color: AppColors.primary,
+                            (i) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? AppColors.primary.withValues(alpha: 0.12)
+                                    : AppColors.primarySoft,
+                                borderRadius: AppSpacing.pillRadius,
+                                border: Border.all(
+                                  color: AppColors.primary.withValues(
+                                    alpha: isDark ? 0.16 : 0.08,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                i,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: isDark
+                                      ? AppColors.primaryMuted
+                                      : AppColors.primaryDark,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
                           )
@@ -164,11 +191,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                   ],
                   const SizedBox(height: AppSpacing.xl),
-                  PicaflorButton(
-                    label: 'Editar perfil',
-                    variant: PicaflorButtonVariant.outline,
-                    icon: Icons.edit_outlined,
-                    onPressed: () => _startEdit(user.displayName, user.bio),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 360),
+                      child: PicaflorButton(
+                        label: 'Editar perfil',
+                        variant: PicaflorButtonVariant.outline,
+                        icon: Icons.edit_outlined,
+                        onPressed: () =>
+                            _startEdit(user.displayName, user.bio),
+                      ),
+                    ),
                   ),
                 ] else ...[
                   PicaflorTextField(
@@ -306,7 +339,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ],
                   ),
                 ),
-              ],
+                  ],
+                ),
+              ),
             );
           },
         ),

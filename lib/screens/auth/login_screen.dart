@@ -67,8 +67,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _enterDemo() async {
     FocusScope.of(context).unfocus();
     await Haptic.medium();
-    final ok = await ref.read(authControllerProvider.notifier).enterDemo();
-    if (ok && mounted) context.go(AppRoutes.home);
+    // Timeout duro: nunca dejar el botón en loading eterno.
+    final ok = await ref
+        .read(authControllerProvider.notifier)
+        .enterDemo()
+        .timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => false,
+        );
+    if (!mounted) return;
+    if (ok) {
+      context.go(AppRoutes.home);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo entrar al demo. Reintenta.')),
+      );
+    }
   }
 
   Future<void> _google() async {

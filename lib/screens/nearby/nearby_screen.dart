@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,13 +16,14 @@ import '../../providers/location_provider.dart';
 import '../../providers/nearby_provider.dart';
 import '../../router/app_router.dart';
 import '../../services/location_service.dart';
-import '../../widgets/nearby_map.dart';
+// flutter_map se carga SOLO al abrir la pestaña Mapa (evita freeze al boot).
+import '../../widgets/nearby_map.dart' deferred as map_lib;
 import '../../widgets/picaflor_card.dart';
 import '../../widgets/picaflor_empty_state.dart';
 import '../../widgets/picaflor_permission_dialog.dart';
 import '../../widgets/picaflor_skeleton.dart';
 
-/// Gente cerca — lista + mapa opcional (OSM).
+/// Gente cerca — lista + mapa. Tier 1 · performance-first · demo-safe.
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -35,18 +37,36 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   /// 0 = lista, 1 = mapa.
   int _viewMode = 0;
 
-  /// Valor del slider mientras se arrastra (feedback visual inmediato).
+  /// Lazy map: no monta tiles hasta la primera visita.
+  bool _mapEverOpened = false;
+
+  /// Library de flutter_map cargada (deferred).
+  bool _mapLibReady = false;
+  bool _mapLibLoading = false;
+
+  /// Valor del slider mientras se arrastra (solo UI local).
   late double _sliderRadius;
 
-  /// Debounce al soltar / arrastrar para no invalidar nearby en cada tick.
   Timer? _radiusDebounce;
+
+  /// UID seleccionado en mapa (feedback visual).
+  String? _selectedMapUid;
+
+  /// Abriendo chat (deshabilita taps, muestra spinner).
+  bool _openingChat = false;
 
   @override
   void initState() {
     super.initState();
     final initial = ref.read(locationControllerProvider).radiusMeters;
     _sliderRadius = initial;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+    // Demo: LocationController ya tiene Santiago en el constructor.
+    // Cero work en el primer frame.
+    if (!AppConfig.demoMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrapProd());
+    } else if (kDebugMode) {
+      debugPrint('📍 NearbyScreen DEMO: skip bootstrap GPS');
+    }
   }
 
   @override
@@ -55,27 +75,27 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     super.dispose();
   }
 
-  Future<void> _bootstrap() async {
+  Future<void> _bootstrapProd() async {
     final controller = ref.read(locationControllerProvider.notifier);
 
-    // Demo: sin diálogo de permisos ni GPS — Santiago altiro.
-    if (AppConfig.demoMode) {
-      await controller.refresh();
-      return;
-    }
+    try {
+      await controller.checkPermission().timeout(const Duration(seconds: 5));
+    } catch (_) {}
 
-    await controller.checkPermission();
     final state = ref.read(locationControllerProvider);
 
     if (state.permission == LocationPermissionStatus.granted) {
-      await controller.refresh();
+      try {
+        await controller.refresh().timeout(const Duration(seconds: 14));
+      } catch (_) {}
       return;
     }
 
     if (!_askedPermission) {
       _askedPermission = true;
       if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      // Diálogo solo tras el primer frame usable.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       if (mounted) await _requestWithDialog();
     }
   }
@@ -119,13 +139,12 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   }
 
   void _onRadiusChanged(double value) {
-    // Solo UI local: NO toca Riverpod ni nearbyUsersProvider.
+    // Solo UI: NO toca Riverpod ni nearby en cada tick.
     setState(() => _sliderRadius = value);
   }
 
   void _onRadiusChangeEnd(double value) {
     Haptic.light();
-    // Un solo commit al soltar + debounce por si llegan eventos repetidos.
     _commitRadius(value);
   }
 
@@ -133,43 +152,145 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     _radiusDebounce?.cancel();
     _radiusDebounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      // setRadius actualiza locationController → nearby reacciona por select(radius).
-      // No hace falta invalidate extra (evita double-fetch).
       ref.read(locationControllerProvider.notifier).setRadius(value);
     });
   }
 
-  Future<void> _openChat(String otherUid) async {
-    await Haptic.medium();
-    final chat = await ref
-        .read(chatControllerProvider.notifier)
-        .openChatWith(otherUid);
-    if (!mounted) return;
-
-    if (chat == null) {
-      final err = ref.read(chatControllerProvider).error;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(err ?? 'No se pudo abrir el chat.'),
-        ),
-      );
+  Future<void> _setViewMode(int mode) async {
+    Haptic.selection();
+    if (mode == 0) {
+      setState(() {
+        _viewMode = 0;
+        _selectedMapUid = null;
+      });
       return;
     }
 
-    context.push(AppRoutes.chatPath(chat.id, otherUid: otherUid));
+    // Mapa: carga deferred de flutter_map ANTES de montar el widget.
+    setState(() {
+      _viewMode = 1;
+      _mapEverOpened = true;
+    });
+
+    if (_mapLibReady || _mapLibLoading) return;
+    _mapLibLoading = true;
+    if (kDebugMode) debugPrint('🗺️ loading flutter_map deferred…');
+    try {
+      await map_lib.loadLibrary().timeout(const Duration(seconds: 8));
+      if (!mounted) return;
+      setState(() {
+        _mapLibReady = true;
+        _mapLibLoading = false;
+      });
+      if (kDebugMode) debugPrint('🗺️ flutter_map ready');
+    } catch (e) {
+      debugPrint('🗺️ map library load failed: $e');
+      if (!mounted) return;
+      setState(() => _mapLibLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo cargar el mapa.')),
+      );
+    }
+  }
+
+  Future<void> _openChat(String otherUid, {bool fromMap = false}) async {
+    if (_openingChat) return;
+    if (otherUid.isEmpty) return;
+
+    final meUid = ref.read(authServiceProvider).currentUid;
+    if (meUid == null) {
+      if (kDebugMode) debugPrint('💬 openChat: sin sesión');
+      return;
+    }
+    if (otherUid == meUid) return;
+
+    setState(() {
+      _openingChat = true;
+      if (fromMap) _selectedMapUid = otherUid;
+    });
+
+    // Haptic no-op en web; no bloquear navegación.
+    unawaited(Haptic.medium());
+
+    try {
+      if (kDebugMode) debugPrint('💬 openChat → $otherUid');
+      // Timeout corto: en demo es local; si cuelga, no dejar UI muerta.
+      final chat = await ref
+          .read(chatControllerProvider.notifier)
+          .openChatWith(otherUid)
+          .timeout(const Duration(seconds: 2));
+
+      if (!mounted) return;
+
+      if (chat == null) {
+        final err = ref.read(chatControllerProvider).error;
+        if (kDebugMode) debugPrint('💬 openChat null: $err');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err ?? 'No se pudo abrir el chat.')),
+        );
+        setState(() {
+          _openingChat = false;
+          _selectedMapUid = null;
+        });
+        return;
+      }
+
+      if (kDebugMode) debugPrint('💬 push chat ${chat.id}');
+      setState(() {
+        _openingChat = false;
+        _selectedMapUid = null;
+      });
+      // Navegar en el siguiente microtask para soltar el frame del press.
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+      context.push(AppRoutes.chatPath(chat.id, otherUid: otherUid));
+    } catch (e) {
+      if (kDebugMode) debugPrint('💬 openChat error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el chat.')),
+      );
+      setState(() {
+        _openingChat = false;
+        _selectedMapUid = null;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final location = ref.watch(locationControllerProvider);
+    // Watches selectivos: menos rebuilds al mover el slider.
+    final isLoadingLoc = ref.watch(
+      locationControllerProvider.select((s) => s.isLoading),
+    );
+    final hasLocation = ref.watch(
+      locationControllerProvider.select((s) => s.hasLocation),
+    );
+    final locationError = ref.watch(
+      locationControllerProvider.select((s) => s.error),
+    );
+    final isPermanent = ref.watch(
+      locationControllerProvider.select(
+        (s) => s.isPermanentlyDenied || s.isServiceDisabled,
+      ),
+    );
+    final centerLat = ref.watch(
+      locationControllerProvider.select(
+        (s) => s.location?.latitude ?? SantiagoBounds.centerLatitude,
+      ),
+    );
+    final centerLon = ref.watch(
+      locationControllerProvider.select(
+        (s) => s.location?.longitude ?? SantiagoBounds.centerLongitude,
+      ),
+    );
+
     final nearby = ref.watch(nearbyUsersProvider);
     final me = ref.watch(currentUserProvider).valueOrNull;
     final firstName = me?.displayName.split(' ').first;
 
-    final centerLat =
-        location.location?.latitude ?? SantiagoBounds.centerLatitude;
-    final centerLon =
-        location.location?.longitude ?? SantiagoBounds.centerLongitude;
+    // LocationState ligero solo para _ListBody (permisos).
+    final location = ref.watch(locationControllerProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -179,12 +300,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
             _Header(
               title: firstName != null ? 'Hola, $firstName' : 'Cerca de ti',
               subtitle: 'Gente alrededor · zona aproximada',
-              isRefreshing: location.isLoading,
+              isRefreshing: isLoadingLoc,
               viewMode: _viewMode,
-              onViewModeChanged: (mode) {
-                Haptic.selection();
-                setState(() => _viewMode = mode);
-              },
+              onViewModeChanged: _setViewMode,
               onRefresh: _onRefresh,
             ),
             _RadiusCard(
@@ -205,31 +323,43 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
-            if (location.error != null && !location.hasLocation)
+            if (locationError != null && !hasLocation)
               _LocationBanner(
-                message: location.error!,
-                isPermanent: location.isPermanentlyDenied ||
-                    location.isServiceDisabled,
+                message: locationError,
+                isPermanent: isPermanent,
                 onAction: _requestWithDialog,
               ),
             Expanded(
-              child: _viewMode == 0
-                  ? _ListBody(
-                      location: location,
-                      nearby: nearby,
-                      onRefresh: _onRefresh,
-                      onRequestPermission: _requestWithDialog,
-                      onOpenChat: _openChat,
-                    )
-                  : _MapBody(
-                      centerLat: centerLat,
-                      centerLon: centerLon,
-                      // Círculo visual sigue el slider altiro.
-                      displayRadiusMeters: _sliderRadius,
-                      nearby: nearby,
-                      onRefresh: _onRefresh,
-                      onOpenChat: _openChat,
-                    ),
+              // IndexedStack: no destruye el mapa al volver a lista.
+              // Lazy: el mapa solo se monta tras la primera visita.
+              child: IndexedStack(
+                index: _viewMode,
+                sizing: StackFit.expand,
+                children: [
+                  _ListBody(
+                    location: location,
+                    nearby: nearby,
+                    onRefresh: _onRefresh,
+                    onRequestPermission: _requestWithDialog,
+                    onOpenChat: (uid) => _openChat(uid),
+                  ),
+                  _mapEverOpened
+                      ? _MapBody(
+                          centerLat: centerLat,
+                          centerLon: centerLon,
+                          displayRadiusMeters: _sliderRadius,
+                          nearby: nearby,
+                          selectedUid: _selectedMapUid,
+                          isBusy: _openingChat,
+                          mapLibReady: _mapLibReady,
+                          mapLibLoading: _mapLibLoading,
+                          onRefresh: _onRefresh,
+                          onOpenChat: (uid) =>
+                              _openChat(uid, fromMap: true),
+                        )
+                      : const SizedBox.shrink(),
+                ],
+              ),
             ),
           ],
         ),
@@ -259,94 +389,246 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final wide = AppLayout.isWide(context);
+    final px = AppLayout.pageX(context);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        AppSpacing.md,
-        AppSpacing.sm,
-        AppSpacing.xs,
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: AppLayout.isDesktop(context)
+              ? AppLayout.contentMaxWide
+              : AppLayout.contentMax,
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(px, wide ? 28 : 20, px, wide ? 14 : 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.55,
+                        height: 1.1,
+                        fontSize: wide ? 26 : 22,
+                      ),
+                    ),
+                    SizedBox(height: wide ? 6 : 5),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isDark
+                            ? AppColors.darkTextSecondary
+                            : AppColors.lightTextSecondary,
+                        height: 1.35,
+                        fontSize: wide ? 14 : 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _ViewModeToggle(
+                viewMode: viewMode,
+                onChanged: onViewModeChanged,
+              ),
+              const SizedBox(width: 8),
+              _RefreshButton(
+                isRefreshing: isRefreshing,
+                onRefresh: onRefresh,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ViewModeToggle extends StatelessWidget {
+  const _ViewModeToggle({
+    required this.viewMode,
+    required this.onChanged,
+  });
+
+  final int viewMode;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showLabels = AppLayout.isWide(context);
+
+    return Container(
+      padding: const EdgeInsets.all(3.5),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurfaceElevated : AppColors.lightChip,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark
+              ? AppColors.darkBorder
+              : AppColors.lightBorder.withValues(alpha: 0.7),
+        ),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          _ToggleSegment(
+            icon: Icons.view_list_rounded,
+            label: 'Lista',
+            selected: viewMode == 0,
+            showLabel: showLabels,
+            onTap: () => onChanged(0),
+          ),
+          _ToggleSegment(
+            icon: Icons.map_rounded,
+            label: 'Mapa',
+            selected: viewMode == 1,
+            showLabel: showLabels,
+            onTap: () => onChanged(1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ToggleSegment extends StatelessWidget {
+  const _ToggleSegment({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.showLabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final bool showLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final selectedColor =
+        isDark ? AppColors.primaryMuted : AppColors.primaryDark;
+    final idleColor = isDark
+        ? AppColors.darkTextTertiary
+        : AppColors.lightTextTertiary;
+
+    return Tooltip(
+      message: label,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            height: 34,
+            padding: EdgeInsets.symmetric(horizontal: showLabel ? 12 : 0),
+            width: showLabel ? null : 38,
+            decoration: BoxDecoration(
+              color: selected
+                  ? (isDark
+                      ? AppColors.primary.withValues(alpha: 0.2)
+                      : AppColors.lightSurface)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+              boxShadow: selected && !isDark
+                  ? [
+                      BoxShadow(
+                        color:
+                            const Color(0xFF0C0F14).withValues(alpha: 0.07),
+                        blurRadius: 5,
+                        offset: const Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  title,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                Icon(
+                  icon,
+                  size: 17,
+                  color: selected ? selectedColor : idleColor,
                 ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: isDark
-                        ? AppColors.darkTextSecondary
-                        : AppColors.lightTextSecondary,
+                if (showLabel) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      letterSpacing: -0.1,
+                      color: selected ? selectedColor : idleColor,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
-          // Toggle Lista / Mapa
-          SegmentedButton<int>(
-            style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.selected)) {
-                  return AppColors.primary.withValues(alpha: 0.14);
-                }
-                return isDark ? AppColors.darkSurface : AppColors.lightSurface;
-              }),
-              foregroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.selected)) {
-                  return AppColors.primaryDark;
-                }
-                return isDark
-                    ? AppColors.darkTextSecondary
-                    : AppColors.lightTextSecondary;
-              }),
-              side: WidgetStatePropertyAll(
-                BorderSide(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                ),
-              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RefreshButton extends StatelessWidget {
+  const _RefreshButton({
+    required this.isRefreshing,
+    required this.onRefresh,
+  });
+
+  final bool isRefreshing;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Tooltip(
+      message: 'Actualizar',
+      child: Material(
+        color: isDark ? AppColors.darkSurfaceElevated : AppColors.lightChip,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: isRefreshing ? null : () => onRefresh(),
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Center(
+              child: isRefreshing
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: isDark
+                            ? AppColors.primaryMuted
+                            : AppColors.primary,
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh_rounded,
+                      size: 20,
+                      color: isDark
+                          ? AppColors.darkTextSecondary
+                          : AppColors.lightTextSecondary,
+                    ),
             ),
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: 0,
-                icon: Icon(Icons.view_list_rounded, size: 18),
-                tooltip: 'Lista',
-              ),
-              ButtonSegment(
-                value: 1,
-                icon: Icon(Icons.map_rounded, size: 18),
-                tooltip: 'Mapa',
-              ),
-            ],
-            selected: {viewMode},
-            onSelectionChanged: (set) {
-              if (set.isNotEmpty) onViewModeChanged(set.first);
-            },
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: isRefreshing ? null : () => onRefresh(),
-            tooltip: 'Actualizar',
-            icon: isRefreshing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh_rounded),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -367,67 +649,149 @@ class _RadiusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final label = LocationPrivacy.formatApproxDistance(radiusMeters);
+    final px = AppLayout.pageX(context);
+    final wide = AppLayout.isWide(context);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        AppSpacing.xs,
-        AppSpacing.pageX,
-        AppSpacing.xs,
-      ),
-      child: PicaflorSurface(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.sm,
-          AppSpacing.md,
-          AppSpacing.xs,
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: AppLayout.isDesktop(context)
+              ? AppLayout.contentMaxWide
+              : AppLayout.contentMax,
         ),
-        child: Column(
-          children: [
-            Row(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(px, 0, px, AppSpacing.sm),
+          child: PicaflorSurface(
+            elevated: true,
+            padding: EdgeInsets.fromLTRB(
+              wide ? 18 : 16,
+              wide ? 14 : 12,
+              wide ? 18 : 16,
+              wide ? 8 : 6,
+            ),
+            child: Column(
               children: [
-                const Icon(Icons.radar_rounded,
-                    size: 18, color: AppColors.primary),
-                const SizedBox(width: AppSpacing.xs),
-                Text(
-                  'Radio',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? AppColors.darkTextPrimary
-                        : AppColors.lightTextPrimary,
+                Row(
+                  children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.primary.withValues(alpha: 0.14)
+                            : AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.radar_rounded,
+                        size: 16,
+                        color: isDark
+                            ? AppColors.primaryMuted
+                            : AppColors.primaryDark,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      'Radio de búsqueda',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                        color: isDark
+                            ? AppColors.darkTextPrimary
+                            : AppColors.lightTextPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.primary.withValues(alpha: 0.14)
+                            : AppColors.primarySoft,
+                        borderRadius: AppSpacing.pillRadius,
+                      ),
+                      child: Text(
+                        label,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: isDark
+                              ? AppColors.primaryMuted
+                              : AppColors.primaryDark,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.1,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: AppColors.primary,
+                    inactiveTrackColor: isDark
+                        ? AppColors.darkBorder
+                        : AppColors.primary.withValues(alpha: 0.1),
+                    thumbColor: AppColors.primary,
+                    overlayColor: AppColors.primary.withValues(alpha: 0.12),
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 8,
+                      elevation: 1.5,
+                      pressedElevation: 3,
+                    ),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 16),
+                    trackShape: const RoundedRectSliderTrackShape(),
+                  ),
+                  child: Slider(
+                    value: radiusMeters.clamp(
+                      SantiagoBounds.minSearchRadiusMeters,
+                      SantiagoBounds.maxSearchRadiusMeters,
+                    ),
+                    min: SantiagoBounds.minSearchRadiusMeters,
+                    max: SantiagoBounds.maxSearchRadiusMeters,
+                    onChanged: onChanged,
+                    onChangeEnd: onChangeEnd,
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  LocationService.formatApproxDistance(radiusMeters),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: AppColors.primary,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 2),
+                  child: Row(
+                    children: [
+                      Text(
+                        LocationPrivacy.formatApproxDistance(
+                          SantiagoBounds.minSearchRadiusMeters,
+                        ),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: isDark
+                              ? AppColors.darkTextTertiary
+                              : AppColors.lightTextTertiary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        LocationPrivacy.formatApproxDistance(
+                          SantiagoBounds.maxSearchRadiusMeters,
+                        ),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: isDark
+                              ? AppColors.darkTextTertiary
+                              : AppColors.lightTextTertiary,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                activeTrackColor: AppColors.primary,
-                inactiveTrackColor:
-                    isDark ? AppColors.darkBorder : AppColors.primarySoft,
-                thumbColor: AppColors.primary,
-                overlayColor: AppColors.primary.withValues(alpha: 0.12),
-                trackHeight: 4,
-              ),
-              child: Slider(
-                value: radiusMeters.clamp(
-                  SantiagoBounds.minSearchRadiusMeters,
-                  SantiagoBounds.maxSearchRadiusMeters,
-                ),
-                min: SantiagoBounds.minSearchRadiusMeters,
-                max: SantiagoBounds.maxSearchRadiusMeters,
-                onChanged: onChanged,
-                onChangeEnd: onChangeEnd,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -441,38 +805,53 @@ class _DemoBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        0,
-        AppSpacing.pageX,
-        AppSpacing.xs,
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
+    final px = AppLayout.pageX(context);
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: AppLayout.isDesktop(context)
+              ? AppLayout.contentMaxWide
+              : AppLayout.contentMax,
         ),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A2A3A) : AppColors.infoSoft,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.auto_awesome_rounded,
-              size: 18,
-              color: isDark ? AppColors.info : AppColors.secondary,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(px, 0, px, AppSpacing.xs),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: 11,
             ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                'Ejemplos mientras llega gente real cerca',
-                style: theme.textTheme.bodySmall,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.info.withValues(alpha: 0.12)
+                  : AppColors.infoSoft,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.info.withValues(alpha: 0.2)
+                    : AppColors.info.withValues(alpha: 0.12),
               ),
             ),
-          ],
+            child: Row(
+              children: [
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 16,
+                  color: isDark ? AppColors.info : AppColors.secondary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Ejemplos mientras llega gente real cerca',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -487,21 +866,30 @@ class _InfoBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        0,
-        AppSpacing.pageX,
-        AppSpacing.xs,
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(AppSpacing.sm + 2),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF3D2A15) : AppColors.warningSoft,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+    final px = AppLayout.pageX(context);
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.contentMax),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(px, 0, px, AppSpacing.xs),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.sm + 2),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.warning.withValues(alpha: 0.12)
+                  : AppColors.warningSoft,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.warning.withValues(alpha: 0.22)
+                    : AppColors.warning.withValues(alpha: 0.14),
+              ),
+            ),
+            child: Text(message, style: theme.textTheme.bodySmall),
+          ),
         ),
-        child: Text(message, style: theme.textTheme.bodySmall),
       ),
     );
   }
@@ -522,32 +910,46 @@ class _LocationBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final px = AppLayout.pageX(context);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        0,
-        AppSpacing.pageX,
-        AppSpacing.xs,
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(AppSpacing.sm + 2),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF3D2A15) : AppColors.warningSoft,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.location_off_outlined,
-                color: AppColors.warning, size: 20),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: Text(message, style: theme.textTheme.bodySmall)),
-            TextButton(
-              onPressed: onAction,
-              child: Text(isPermanent ? 'Ajustes' : 'Permitir'),
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.contentMax),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(px, 0, px, AppSpacing.xs),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.sm + 2),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.warning.withValues(alpha: 0.12)
+                  : AppColors.warningSoft,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.warning.withValues(alpha: 0.22)
+                    : AppColors.warning.withValues(alpha: 0.14),
+              ),
             ),
-          ],
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.location_off_outlined,
+                  color: AppColors.warning,
+                  size: 20,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(message, style: theme.textTheme.bodySmall),
+                ),
+                TextButton(
+                  onPressed: onAction,
+                  child: Text(isPermanent ? 'Ajustes' : 'Permitir'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -571,12 +973,17 @@ class _ListBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (location.isLoading && !location.hasLocation) {
+    // Demo: nunca skeleton por GPS.
+    if (!AppConfig.demoMode &&
+        location.isLoading &&
+        !location.hasLocation) {
       return const PicaflorSkeleton(itemCount: 6);
     }
 
     return nearby.when(
-      loading: () => const PicaflorSkeleton(itemCount: 6),
+      loading: () => AppConfig.demoMode
+          ? const SizedBox.shrink()
+          : const PicaflorSkeleton(itemCount: 6),
       error: (_, __) => PicaflorEmptyState(
         icon: Icons.cloud_off_outlined,
         title: 'No pudimos cargar',
@@ -593,7 +1000,7 @@ class _ListBody extends StatelessWidget {
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                const SizedBox(height: 64),
+                const SizedBox(height: 72),
                 PicaflorEmptyState(
                   icon: Icons.person_search_outlined,
                   title: 'Nadie cerca… por ahora',
@@ -611,6 +1018,9 @@ class _ListBody extends StatelessWidget {
           );
         }
 
+        final px = AppLayout.pageX(context);
+        final wide = AppLayout.isWide(context);
+
         return RefreshIndicator(
           color: AppColors.primary,
           onRefresh: onRefresh,
@@ -618,24 +1028,31 @@ class _ListBody extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(
               parent: BouncingScrollPhysics(),
             ),
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.pageX,
+            padding: EdgeInsets.fromLTRB(
+              px,
               AppSpacing.xs,
-              AppSpacing.pageX,
-              AppSpacing.xl,
+              px,
+              wide ? AppSpacing.xxl : AppSpacing.xl,
             ),
             itemCount: people.length,
             separatorBuilder: (_, __) =>
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: wide ? 14 : AppSpacing.listGap),
             itemBuilder: (context, index) {
               final item = people[index];
-              return PicaflorPersonCard(
-                user: item.user,
-                distanceLabel: LocationService.formatApproxDistance(
-                  item.distanceMeters,
+              return Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints:
+                      const BoxConstraints(maxWidth: AppLayout.contentMax),
+                  child: PicaflorPersonCard(
+                    user: item.user,
+                    distanceLabel: LocationPrivacy.formatApproxDistance(
+                      item.distanceMeters,
+                    ),
+                    onTap: () => onOpenChat(item.user.uid),
+                    onChat: () => onOpenChat(item.user.uid),
+                  ),
                 ),
-                onTap: () => onOpenChat(item.user.uid),
-                onChat: () => onOpenChat(item.user.uid),
               );
             },
           ),
@@ -651,6 +1068,10 @@ class _MapBody extends StatelessWidget {
     required this.centerLon,
     required this.displayRadiusMeters,
     required this.nearby,
+    required this.selectedUid,
+    required this.isBusy,
+    required this.mapLibReady,
+    required this.mapLibLoading,
     required this.onRefresh,
     required this.onOpenChat,
   });
@@ -659,21 +1080,57 @@ class _MapBody extends StatelessWidget {
   final double centerLon;
   final double displayRadiusMeters;
   final AsyncValue<NearbyResult> nearby;
+  final String? selectedUid;
+  final bool isBusy;
+  final bool mapLibReady;
+  final bool mapLibLoading;
   final Future<void> Function() onRefresh;
   final Future<void> Function(String otherUid) onOpenChat;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.pageX,
-        AppSpacing.xs,
-        AppSpacing.pageX,
-        AppSpacing.md,
-      ),
-      child: nearby.when(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final px = AppLayout.pageX(context);
+    final wide = AppLayout.isWide(context);
+    final desktop = AppLayout.isDesktop(context);
+
+    Widget mapContent;
+    if (!mapLibReady) {
+      mapContent = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              mapLibLoading ? 'Preparando mapa…' : 'Mapa no disponible',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
+                  ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      mapContent = nearby.when(
         loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: AppColors.primary,
+            ),
+          ),
         ),
         error: (_, __) => PicaflorEmptyState(
           icon: Icons.map_outlined,
@@ -683,14 +1140,39 @@ class _MapBody extends StatelessWidget {
           onAction: onRefresh,
         ),
         data: (result) {
-          return NearbyMapView(
+          return map_lib.NearbyMapView(
             centerLat: centerLat,
             centerLon: centerLon,
             radiusMeters: displayRadiusMeters,
             people: result.people,
+            selectedUid: selectedUid,
+            isBusy: isBusy,
             onPersonTap: (p) => onOpenChat(p.user.uid),
           );
         },
+      );
+    }
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.contentMaxWide),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            px,
+            AppSpacing.xs,
+            px,
+            wide ? AppSpacing.lg : AppSpacing.md,
+          ),
+          child: desktop
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: AppLayout.mapMinHeightDesktop,
+                  ),
+                  child: SizedBox.expand(child: mapContent),
+                )
+              : mapContent,
+        ),
       ),
     );
   }

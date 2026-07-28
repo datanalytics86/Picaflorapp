@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/config/app_config.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../screens/auth/login_screen.dart';
@@ -62,7 +63,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: AppRoutes.splash,
+    // DEMO con sesión pre-cargada → home. Sin sesión → login.
+    // Nunca splash (atrapa al usuario con spinner).
+    initialLocation: AppConfig.demoMode ? AppRoutes.home : AppRoutes.login,
     refreshListenable: refresh,
     debugLogDiagnostics: false,
     redirect: (context, state) {
@@ -75,21 +78,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isLogin = loc == AppRoutes.login;
       final isLoggedIn = session != null;
 
-      // Onboarding pendiente.
+      // Onboarding pendiente (solo una vez).
       if (!onboardingDone) {
         if (isOnboarding) return null;
         return AppRoutes.onboarding;
       }
 
-      // Sin sesión → login.
+      // Sin sesión → login (splash redirige altiro, sin quedarse).
       if (!isLoggedIn) {
         if (isLogin) return null;
-        if (isSplash) return AppRoutes.login;
-        // Cualquier ruta protegida (home, chat, etc.) → login.
         return AppRoutes.login;
       }
 
-      // Con sesión: salir de flows de auth.
+      // Con sesión: salir de flows de auth / splash.
       if (isLogin || isOnboarding || isSplash) {
         return AppRoutes.home;
       }

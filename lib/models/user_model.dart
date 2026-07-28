@@ -1,7 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 /// Usuario de Picaflor.
+///
+/// **Sin dependencias de Firebase** — el arranque DEMO/web no carga
+/// cloud_firestore solo por importar este modelo.
 class UserModel extends Equatable {
   const UserModel({
     required this.uid,
@@ -46,11 +48,6 @@ class UserModel extends Equatable {
     return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
   }
 
-  factory UserModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? {};
-    return UserModel.fromMap(data, uid: doc.id);
-  }
-
   factory UserModel.fromMap(Map<String, dynamic> map, {String? uid}) {
     return UserModel(
       uid: uid ?? map['uid'] as String? ?? '',
@@ -73,6 +70,7 @@ class UserModel extends Equatable {
     );
   }
 
+  /// Mapa JSON-friendly (demo + serialización). Firestore live usa mappers.
   Map<String, dynamic> toMap() {
     return {
       'uid': uid,
@@ -85,14 +83,14 @@ class UserModel extends Equatable {
       'longitude': longitude,
       'isOnline': isOnline,
       'isVisible': isVisible,
-      'lastSeen': lastSeen != null ? Timestamp.fromDate(lastSeen!) : null,
-      'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
-      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
+      'lastSeen': lastSeen?.toIso8601String(),
+      'createdAt': createdAt?.toIso8601String(),
+      'updatedAt': updatedAt?.toIso8601String(),
       'fcmToken': fcmToken,
     };
   }
 
-  /// Mapa para crear el doc en Firestore (usa server timestamps).
+  /// Payload de creación (sin FieldValue — el live mapper lo enriquece).
   Map<String, dynamic> toCreateMap() {
     return {
       'uid': uid,
@@ -105,9 +103,6 @@ class UserModel extends Equatable {
       'longitude': longitude,
       'isOnline': true,
       'isVisible': true,
-      'lastSeen': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
       'fcmToken': fcmToken,
     };
   }
@@ -149,9 +144,15 @@ class UserModel extends Equatable {
 
   static DateTime? _toDate(dynamic value) {
     if (value == null) return null;
-    if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value);
+    // Timestamp de Firestore (duck-typing sin importar el paquete).
+    try {
+      final dynamic v = value;
+      if (v is Object && v.runtimeType.toString().contains('Timestamp')) {
+        return (v as dynamic).toDate() as DateTime?;
+      }
+    } catch (_) {}
     return null;
   }
 

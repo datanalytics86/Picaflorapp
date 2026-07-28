@@ -7,6 +7,7 @@ import '../models/auth_session.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
+import '../core/utils/location_privacy.dart';
 import 'demo_nearby.dart';
 
 /// Store en memoria para el modo demo (sin Firebase).
@@ -68,14 +69,16 @@ class DemoStore {
     String? displayName,
   }) {
     final now = DateTime.now();
+    // Ubicación siempre referencial (~150 m), nunca exacta.
+    final approx = LocationPrivacy.santiagoCenterApprox();
     return UserModel(
       uid: AppConfig.demoUid,
       email: email ?? AppConfig.demoEmail,
       displayName: displayName ?? AppConfig.demoDisplayName,
       bio: AppConfig.demoBio,
       interests: const ['demo', 'santiago', 'café'],
-      latitude: SantiagoBounds.centerLatitude,
-      longitude: SantiagoBounds.centerLongitude,
+      latitude: approx.latitude,
+      longitude: approx.longitude,
       isOnline: true,
       isVisible: true,
       lastSeen: now,
@@ -454,18 +457,42 @@ class DemoStore {
   }) async {
     final chat = _chats[chatId];
     if (chat == null) return;
+
+    // Si ya está en 0, no notificar (evita rebuild loops).
+    final currentUnread = chat.unreadCount[uid] ?? 0;
+    if (currentUnread == 0) return;
+
     final unread = Map<String, int>.from(chat.unreadCount);
     unread[uid] = 0;
     _chats[chatId] = chat.copyWith(unreadCount: unread);
+
+    // Actualiza isRead en mensajes SIN re-emitir el stream de mensajes
+    // (re-emitir + listen(markAsRead) = loop infinito / freeze).
     final msgs = _messages[chatId];
     if (msgs != null) {
       _messages[chatId] = [
         for (final m in msgs)
-          m.senderId == uid ? m : m.copyWith(isRead: true),
+          m.senderId == uid || m.isRead ? m : m.copyWith(isRead: true),
       ];
     }
-    _messageCtrls[chatId]?.add(null);
+
+    // Solo notifica lista de chats / badge — NO message stream.
     _chatsCtrl.add(null);
+  }
+
+  /// Snapshot síncrono de usuarios (UI chat sin esperar StreamProvider).
+  Map<String, UserModel> get usersSnapshot =>
+      Map<String, UserModel>.unmodifiable(_users);
+
+  /// Snapshot síncrono de mensajes de un chat.
+  List<MessageModel> messagesSnapshot(String chatId) {
+    final list = List<MessageModel>.from(_messages[chatId] ?? const []);
+    list.sort((a, b) {
+      final aT = a.createdAt ?? DateTime(2000);
+      final bT = b.createdAt ?? DateTime(2000);
+      return aT.compareTo(bT);
+    });
+    return list;
   }
 
   Stream<int> watchTotalUnread(String uid) {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,17 +8,16 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
 import '../../core/utils/time_ago.dart';
 import '../../data/demo_nearby.dart';
+import '../../data/demo_store.dart';
 import '../../models/message_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
-import '../../providers/user_provider.dart';
 import '../../widgets/chat_bubble.dart';
 import '../../widgets/message_input.dart';
 import '../../widgets/picaflor_avatar.dart';
-import '../../widgets/picaflor_loading.dart';
 
-/// Conversación 1:1 premium.
+/// Conversación 1:1 — sin loops de markAsRead (freeze fix).
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
     super.key,
@@ -34,12 +34,15 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
+  bool _didMarkRead = false;
 
   @override
   void initState() {
     super.initState();
+    // Una sola vez, post-frame — NO en ref.listen (causaba loop infinito).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
+      _markReadOnce();
+      _scrollToEnd(jump: true);
     });
   }
 
@@ -49,11 +52,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
-  UserModel? _demoUser(String uid) {
+  void _markReadOnce() {
+    if (_didMarkRead) return;
+    _didMarkRead = true;
+    final uid = ref.read(authServiceProvider).currentUid;
+    if (uid == null || widget.chatId.isEmpty) return;
+    // Fire-and-forget, sin await en el frame.
+    ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
+  }
+
+  UserModel? _resolveOther(String uid) {
+    if (uid.isEmpty) return null;
+    // Sync: DemoStore primero (sin StreamProvider que se quede loading).
+    final fromStore = DemoStore.instance.usersSnapshot[uid];
+    if (fromStore != null) return fromStore;
     if (!uid.startsWith('demo_')) return null;
     for (final d in DemoNearby.people(
-      originLat: -33.45,
-      originLon: -70.67,
+      originLat: -33.4489,
+      originLon: -70.6693,
     )) {
       if (d.user.uid == uid) return d.user;
     }
@@ -61,6 +77,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<bool> _send(String text, String otherUid) async {
+    if (otherUid.isEmpty) return false;
     await Haptic.light();
     final ok = await ref.read(chatControllerProvider.notifier).sendMessage(
           chatId: widget.chatId,
@@ -68,7 +85,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           otherUid: otherUid,
         );
     if (ok) {
-      await ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
       _scrollToEnd();
     } else if (mounted) {
       final err = ref.read(chatControllerProvider).error;
@@ -80,14 +96,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return ok;
   }
 
-  void _scrollToEnd() {
+  void _scrollToEnd({bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+      final target = _scrollController.position.maxScrollExtent + 80;
+      if (jump || kIsWeb) {
+        _scrollController.jumpTo(target);
+      } else {
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -96,6 +117,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final myUid = ref.watch(authServiceProvider).currentUid ?? '';
+
+    // Mensajes: StreamProvider con fallback sync desde DemoStore si loading.
     final messagesAsync = ref.watch(chatMessagesProvider(widget.chatId));
     final sendState = ref.watch(chatControllerProvider);
 
@@ -104,14 +127,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         chatAsync.valueOrNull?.otherParticipantId(myUid) ??
         '';
 
-    final otherAsync = ref.watch(userByIdProvider(resolvedOtherUid));
-    final other = otherAsync.valueOrNull ?? _demoUser(resolvedOtherUid);
+    final other = _resolveOther(resolvedOtherUid);
     final isDemo = resolvedOtherUid.startsWith('demo_');
 
-    ref.listen(chatMessagesProvider(widget.chatId), (_, __) {
-      ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
-      _scrollToEnd();
+    // Solo scroll cuando llegan mensajes nuevos — SIN markAsRead aquí.
+    ref.listen(chatMessagesProvider(widget.chatId), (prev, next) {
+      final prevLen = prev?.valueOrNull?.length ?? 0;
+      final nextLen = next.valueOrNull?.length ?? 0;
+      if (nextLen > prevLen) {
+        _scrollToEnd();
+      }
     });
+
+    final messages = messagesAsync.valueOrNull ??
+        DemoStore.instance.messagesSnapshot(widget.chatId);
 
     return Scaffold(
       appBar: AppBar(
@@ -171,93 +200,104 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 horizontal: AppSpacing.md,
                 vertical: AppSpacing.sm,
               ),
-              color: isDark ? const Color(0xFF1A2A3A) : AppColors.infoSoft,
+              color: isDark
+                  ? AppColors.info.withValues(alpha: 0.12)
+                  : AppColors.infoSoft,
               child: Text(
-                'Este perfil es de ejemplo. Los mensajes no se envían.',
+                'Perfil de ejemplo · puedes escribir (solo en este dispositivo).',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall,
               ),
             ),
           Expanded(
-            child: messagesAsync.when(
-              loading: () =>
-                  const PicaflorLoading(message: 'Cargando mensajes…'),
-              error: (_, __) => Center(
-                child: Text(
-                  'No se pudieron cargar los mensajes.',
-                  style: theme.textTheme.bodyMedium,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: AppLayout.contentMaxChat,
                 ),
-              ),
-              data: (messages) {
-                if (messages.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.xxl),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.waving_hand_rounded,
-                            size: 40,
-                            color: AppColors.primary,
+                child: messages.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xxl),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? AppColors.primary
+                                          .withValues(alpha: 0.14)
+                                      : AppColors.primarySoft,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.waving_hand_rounded,
+                                  size: 32,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              Text(
+                                'Di hola 👋',
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.xs),
+                              Text(
+                                'Sé el primero en escribir. Un saludo basta.',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: isDark
+                                      ? AppColors.darkTextSecondary
+                                      : AppColors.lightTextSecondary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: AppSpacing.md),
-                          Text('Di hola 👋',
-                              style: theme.textTheme.headlineSmall),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            isDemo
-                                ? 'Los ejemplos no reciben mensajes reales.'
-                                : 'Sé el primero en escribir. Un saludo basta.',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: isDark
-                                  ? AppColors.darkTextSecondary
-                                  : AppColors.lightTextSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.sm,
-                    AppSpacing.md,
-                    AppSpacing.sm,
-                  ),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final msg = messages[index];
-                    final prev = index > 0 ? messages[index - 1] : null;
-                    final showDay = _shouldShowDay(prev, msg);
-                    final isMine = msg.isMine(myUid);
-                    final showTail = index == messages.length - 1 ||
-                        messages[index + 1].senderId != msg.senderId;
-
-                    return Column(
-                      children: [
-                        if (showDay && msg.createdAt != null)
-                          ChatDaySeparator(date: msg.createdAt!),
-                        ChatBubble(
-                          message: msg,
-                          isMine: isMine,
-                          showTail: showTail,
                         ),
-                      ],
-                    );
-                  },
-                );
-              },
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: EdgeInsets.fromLTRB(
+                          AppLayout.pageX(context).clamp(16, 28),
+                          AppSpacing.sm,
+                          AppLayout.pageX(context).clamp(16, 28),
+                          AppSpacing.sm,
+                        ),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = messages[index];
+                          final prev = index > 0 ? messages[index - 1] : null;
+                          final showDay = _shouldShowDay(prev, msg);
+                          final isMine = msg.isMine(myUid);
+                          final showTail = index == messages.length - 1 ||
+                              messages[index + 1].senderId != msg.senderId;
+
+                          return Column(
+                            children: [
+                              if (showDay && msg.createdAt != null)
+                                ChatDaySeparator(date: msg.createdAt!),
+                              ChatBubble(
+                                message: msg,
+                                isMine: isMine,
+                                showTail: showTail,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+              ),
             ),
           ),
           MessageInput(
             isSending: sendState.isSending,
-            hint: isDemo ? 'Ejemplo · no se envía' : 'Escribe un mensaje…',
+            hint: 'Escribe un mensaje…',
             onSend: (text) => _send(text, resolvedOtherUid),
           ),
         ],

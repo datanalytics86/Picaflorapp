@@ -31,11 +31,15 @@ class SettingsScreen extends ConsumerWidget {
         ),
         title: const Text('Ajustes'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.pageX,
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppLayout.contentMax),
+          child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          AppLayout.pageX(context),
           AppSpacing.sm,
-          AppSpacing.pageX,
+          AppLayout.pageX(context),
           AppSpacing.xxl,
         ),
         children: [
@@ -297,6 +301,8 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }

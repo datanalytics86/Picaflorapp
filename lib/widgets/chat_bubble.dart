@@ -48,12 +48,15 @@ class ChatBubble extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.75)
         : (isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary);
 
+    final screenW = MediaQuery.sizeOf(context).width;
+    final maxBubble = screenW >= AppLayout.medium
+        ? 420.0
+        : screenW * 0.78;
+
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
-        ),
+        constraints: BoxConstraints(maxWidth: maxBubble),
         child: Container(
           margin: EdgeInsets.only(
             top: 2,
@@ -70,6 +73,15 @@ class ChatBubble extends StatelessWidget {
               bottomLeft: Radius.circular(isMine ? 18 : (showTail ? 4 : 18)),
               bottomRight: Radius.circular(isMine ? (showTail ? 4 : 18) : 18),
             ),
+            boxShadow: isMine
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Column(
             crossAxisAlignment:

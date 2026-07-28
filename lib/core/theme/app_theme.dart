@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
+import 'app_spacing.dart';
 import 'app_typography.dart';
 
 /// Temas light/dark de Picaflor — limpios, suaves y con mucho whitespace.
@@ -45,8 +46,8 @@ abstract final class AppTheme {
       outline: isDark ? AppColors.darkBorder : AppColors.lightBorder,
       outlineVariant:
           isDark ? AppColors.darkDivider : AppColors.lightDivider,
-      shadow: Colors.black.withValues(alpha: 0.08),
-      scrim: Colors.black.withValues(alpha: 0.4),
+      shadow: Colors.black.withValues(alpha: isDark ? 0.28 : 0.06),
+      scrim: Colors.black.withValues(alpha: 0.45),
       inverseSurface:
           isDark ? AppColors.lightSurface : AppColors.darkSurface,
       onInverseSurface:
@@ -95,9 +96,9 @@ abstract final class AppTheme {
         color: isDark ? AppColors.darkCard : AppColors.lightCard,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
           side: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            color: AppColors.cardBorder(isDark: isDark),
             width: 1,
           ),
         ),
@@ -114,9 +115,9 @@ abstract final class AppTheme {
           disabledForegroundColor:
               isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          minimumSize: const Size(double.infinity, 54),
+          minimumSize: const Size(double.infinity, 52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
           textStyle: AppTypography.button,
         ),
@@ -126,11 +127,14 @@ abstract final class AppTheme {
         style: OutlinedButton.styleFrom(
           elevation: 0,
           foregroundColor: AppColors.primary,
-          side: const BorderSide(color: AppColors.primary, width: 1.5),
+          side: BorderSide(
+            color: AppColors.primary.withValues(alpha: 0.85),
+            width: 1.4,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          minimumSize: const Size(double.infinity, 54),
+          minimumSize: const Size(double.infinity, 52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
           textStyle: AppTypography.button,
         ),
@@ -154,27 +158,27 @@ abstract final class AppTheme {
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: BorderSide(
             color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: BorderSide(
             color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: const BorderSide(color: AppColors.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           borderSide: const BorderSide(color: AppColors.error, width: 1.5),
         ),
         hintStyle: textTheme.bodyMedium?.copyWith(

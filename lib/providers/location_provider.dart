@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -65,61 +66,66 @@ class LocationState {
 class LocationController extends StateNotifier<LocationState> {
   LocationController(this._location, this._prefs, this._ref)
       : super(LocationState(
-          // Demo: Santiago altiro, sin loading ni GPS.
+          // Demo: Santiago altiro en el constructor — cero async, cero GPS.
           location: AppConfig.demoMode
-              ? LocationService.santiagoCenterApprox()
+              ? LocationPrivacy.santiagoCenterApprox()
               : null,
           permission: AppConfig.demoMode
               ? LocationPermissionStatus.granted
               : LocationPermissionStatus.unknown,
+          // isLoading false siempre al inicio en demo.
+          isLoading: false,
           radiusMeters: _prefs.getDouble(AppConstants.keySearchRadius) ??
               SantiagoBounds.defaultSearchRadiusMeters,
-        ));
+        )) {
+    if (kDebugMode && AppConfig.demoMode) {
+      debugPrint('📍 LocationController DEMO ready (sync Santiago)');
+    }
+  }
 
   final LocationService _location;
   final SharedPreferences _prefs;
   final Ref _ref;
 
-  /// Solo revisa permisos (sin GPS). En demo: granted inmediato.
   Future<void> checkPermission() async {
     if (AppConfig.demoMode) {
       state = state.copyWith(
         permission: LocationPermissionStatus.granted,
-        location: state.location ?? LocationService.santiagoCenterApprox(),
+        location: state.location ?? LocationPrivacy.santiagoCenterApprox(),
         isLoading: false,
         clearError: true,
       );
       return;
     }
 
-    final status = await _location.checkPermissionStatus();
+    final status = await _location
+        .checkPermissionStatus()
+        .timeout(const Duration(seconds: 5), onTimeout: () {
+      return LocationPermissionStatus.unknown;
+    });
     state = state.copyWith(permission: status);
   }
 
-  /// Pide permiso + obtiene ubicación aproximada + opcionalmente sincroniza.
-  ///
-  /// En demo **nunca** llama a Geolocator: centro de Santiago altiro.
+  /// Demo: síncrono. Prod: GPS con timeouts.
   Future<bool> refresh({bool updateFirestore = true}) async {
-    // ── Demo: instantáneo, sin GPS ──────────────────────────────────────
     if (AppConfig.demoMode) {
-      // Ya tenemos Santiago en el estado inicial; reafirma y listo.
-      if (!state.hasLocation) {
-        _useSantiagoFallback();
-      } else {
-        state = state.copyWith(
-          isLoading: false,
-          permission: LocationPermissionStatus.granted,
-          clearError: true,
-        );
-      }
-      // Sync de perfil demo sin bloquear el UI thread.
+      // 100% síncrono — no toca plugins, no await de red.
+      final loc = state.location ?? LocationPrivacy.santiagoCenterApprox();
+      state = state.copyWith(
+        location: loc,
+        isLoading: false,
+        permission: LocationPermissionStatus.granted,
+        clearError: true,
+      );
       if (updateFirestore) {
-        unawaited(_syncLocationToProfile());
+        // Después del frame: no bloquea paint.
+        scheduleMicrotask(() {
+          unawaited(_syncLocationToProfile());
+        });
       }
       return true;
     }
 
-    // ── Producción ──────────────────────────────────────────────────────
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
@@ -142,7 +148,6 @@ class LocationController extends StateNotifier<LocationState> {
         return false;
       }
 
-      // Safety net: nunca dejar isLoading=true si GPS cuelga.
       final approx = await _location.getApproxLocation().timeout(
         const Duration(seconds: 12),
       );
@@ -184,27 +189,21 @@ class LocationController extends StateNotifier<LocationState> {
     final loc = state.location;
     if (uid == null || loc == null) return;
     try {
-      await _ref.read(userServiceProvider).updateLocation(
+      await _ref
+          .read(userServiceProvider)
+          .updateLocation(
             uid: uid,
             latitude: loc.latitude,
             longitude: loc.longitude,
-          );
+          )
+          .timeout(const Duration(seconds: 4));
     } catch (_) {
-      // No bloquear la UI si el perfil no sincroniza.
+      // No bloquear la UI.
     }
   }
 
-  void _useSantiagoFallback() {
-    final approx = LocationService.santiagoCenterApprox();
-    state = state.copyWith(
-      location: approx,
-      isLoading: false,
-      permission: LocationPermissionStatus.granted,
-      clearError: true,
-    );
-  }
-
   Future<void> openSettings() async {
+    if (AppConfig.demoMode) return;
     if (state.isServiceDisabled) {
       await _location.openLocationSettings();
     } else {
@@ -212,7 +211,6 @@ class LocationController extends StateNotifier<LocationState> {
     }
   }
 
-  /// Persiste el radio de búsqueda (llamar al soltar el slider / debounce).
   Future<void> setRadius(double meters) async {
     final clamped = meters
         .clamp(
@@ -222,7 +220,13 @@ class LocationController extends StateNotifier<LocationState> {
         .toDouble();
     if (state.radiusMeters == clamped) return;
     state = state.copyWith(radiusMeters: clamped);
-    await _prefs.setDouble(AppConstants.keySearchRadius, clamped);
+    try {
+      await _prefs
+          .setDouble(AppConstants.keySearchRadius, clamped)
+          .timeout(const Duration(milliseconds: 500));
+    } catch (_) {
+      // Preferencia no crítica.
+    }
   }
 }
 

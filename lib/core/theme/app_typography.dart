@@ -1,11 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'app_colors.dart';
 
-/// Tipografía Picaflor — Poppins en nativo; en **web** usa fuentes del sistema
-/// para no bloquear la UI esperando fonts.gstatic.com.
+/// Tipografía Picaflor Tier 1 — system fonts (web-safe), tracking en títulos.
 abstract final class AppTypography {
   static TextTheme textTheme({required bool isDark}) {
     final Color primary =
@@ -22,25 +20,15 @@ abstract final class AppTypography {
       Color? color,
       double letterSpacing = 0,
     }) {
-      // Web: sin fetch de red (GoogleFonts runtime puede colgar el primer frame).
-      if (kIsWeb) {
-        return TextStyle(
-          fontFamily: 'Segoe UI',
-          fontFamilyFallback: const [
-            'Roboto',
-            'Helvetica Neue',
-            'Arial',
-            'sans-serif',
-          ],
-          fontWeight: weight,
-          fontSize: size,
-          height: height,
-          color: color ?? primary,
-          letterSpacing: letterSpacing,
-        );
-      }
-
-      return GoogleFonts.poppins(
+      return TextStyle(
+        fontFamily: kIsWeb ? 'Segoe UI' : null,
+        fontFamilyFallback: const [
+          'SF Pro Text',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+        ],
         fontWeight: weight,
         fontSize: size,
         height: height,
@@ -50,94 +38,54 @@ abstract final class AppTypography {
     }
 
     return TextTheme(
-      displayLarge: base(FontWeight.w700, 40, 1.15, letterSpacing: -0.8),
-      displayMedium: base(FontWeight.w700, 32, 1.2, letterSpacing: -0.5),
-      displaySmall: base(FontWeight.w600, 28, 1.25, letterSpacing: -0.3),
-      headlineLarge: base(FontWeight.w600, 24, 1.3, letterSpacing: -0.2),
-      headlineMedium: base(FontWeight.w600, 20, 1.35),
-      headlineSmall: base(FontWeight.w600, 18, 1.35),
-      titleLarge: base(FontWeight.w600, 17, 1.4),
-      titleMedium: base(FontWeight.w500, 15, 1.4),
-      titleSmall: base(FontWeight.w500, 13, 1.4, color: secondary),
+      displayLarge: base(FontWeight.w700, 40, 1.1, letterSpacing: -1.1),
+      displayMedium: base(FontWeight.w700, 32, 1.12, letterSpacing: -0.8),
+      displaySmall: base(FontWeight.w700, 28, 1.18, letterSpacing: -0.55),
+      headlineLarge: base(FontWeight.w700, 24, 1.22, letterSpacing: -0.45),
+      headlineMedium: base(FontWeight.w700, 20, 1.25, letterSpacing: -0.4),
+      headlineSmall: base(FontWeight.w600, 18, 1.28, letterSpacing: -0.3),
+      titleLarge: base(FontWeight.w600, 17, 1.32, letterSpacing: -0.22),
+      titleMedium: base(FontWeight.w600, 15.5, 1.32, letterSpacing: -0.18),
+      titleSmall: base(FontWeight.w500, 13, 1.35, color: secondary),
       bodyLarge: base(FontWeight.w400, 16, 1.55),
       bodyMedium: base(FontWeight.w400, 14, 1.5),
-      bodySmall: base(FontWeight.w400, 12, 1.45, color: secondary),
-      labelLarge: base(FontWeight.w600, 15, 1.2, letterSpacing: 0.1),
-      labelMedium: base(FontWeight.w500, 13, 1.2, color: secondary),
+      bodySmall: base(FontWeight.w400, 13, 1.45, color: secondary),
+      labelLarge: base(FontWeight.w600, 14, 1.2, letterSpacing: 0.02),
+      labelMedium: base(FontWeight.w500, 12, 1.25, color: secondary),
       labelSmall:
-          base(FontWeight.w500, 11, 1.2, color: tertiary, letterSpacing: 0.2),
+          base(FontWeight.w500, 11, 1.2, color: tertiary, letterSpacing: 0.12),
     );
   }
 
-  static TextStyle get brandTitle {
-    if (kIsWeb) {
-      return const TextStyle(
+  static TextStyle get brandTitle => const TextStyle(
         fontFamily: 'Segoe UI',
         fontWeight: FontWeight.w700,
         fontSize: 28,
-        height: 1.2,
-        letterSpacing: -0.4,
+        height: 1.12,
+        letterSpacing: -0.55,
         color: AppColors.primary,
       );
-    }
-    return GoogleFonts.poppins(
-      fontWeight: FontWeight.w700,
-      fontSize: 28,
-      height: 1.2,
-      letterSpacing: -0.4,
-      color: AppColors.primary,
-    );
-  }
 
-  static TextStyle get button {
-    if (kIsWeb) {
-      return const TextStyle(
+  static TextStyle get button => const TextStyle(
         fontFamily: 'Segoe UI',
         fontWeight: FontWeight.w600,
         fontSize: 15,
         height: 1.2,
-        letterSpacing: 0.1,
+        letterSpacing: 0.02,
       );
-    }
-    return GoogleFonts.poppins(
-      fontWeight: FontWeight.w600,
-      fontSize: 15,
-      height: 1.2,
-      letterSpacing: 0.1,
-    );
-  }
 
-  static TextStyle get caption {
-    if (kIsWeb) {
-      return const TextStyle(
+  static TextStyle get caption => const TextStyle(
         fontFamily: 'Segoe UI',
         fontWeight: FontWeight.w400,
         fontSize: 12,
         height: 1.4,
       );
-    }
-    return GoogleFonts.poppins(
-      fontWeight: FontWeight.w400,
-      fontSize: 12,
-      height: 1.4,
-    );
-  }
 
-  static TextStyle get overline {
-    if (kIsWeb) {
-      return const TextStyle(
+  static TextStyle get overline => const TextStyle(
         fontFamily: 'Segoe UI',
         fontWeight: FontWeight.w600,
         fontSize: 11,
         height: 1.2,
-        letterSpacing: 0.8,
+        letterSpacing: 0.55,
       );
-    }
-    return GoogleFonts.poppins(
-      fontWeight: FontWeight.w600,
-      fontSize: 11,
-      height: 1.2,
-      letterSpacing: 0.8,
-    );
-  }
 }

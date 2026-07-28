@@ -1,7 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 /// Conversación 1:1 entre dos usuarios de Picaflor.
+/// Sin dependencias de Firebase.
 class ChatModel extends Equatable {
   const ChatModel({
     required this.id,
@@ -19,13 +19,10 @@ class ChatModel extends Equatable {
   final String? lastMessage;
   final String? lastMessageSenderId;
   final DateTime? lastMessageAt;
-
-  /// Mapa uid → cantidad de no leídos.
   final Map<String, int> unreadCount;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  /// El otro participante respecto al usuario actual.
   String otherParticipantId(String currentUid) {
     return participantIds.firstWhere(
       (id) => id != currentUid,
@@ -36,11 +33,6 @@ class ChatModel extends Equatable {
   int unreadFor(String uid) => unreadCount[uid] ?? 0;
 
   bool hasUnread(String uid) => unreadFor(uid) > 0;
-
-  factory ChatModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? {};
-    return ChatModel.fromMap(data, id: doc.id);
-  }
 
   factory ChatModel.fromMap(Map<String, dynamic> map, {String? id}) {
     final unreadRaw = map['unreadCount'] as Map<String, dynamic>? ?? {};
@@ -69,11 +61,10 @@ class ChatModel extends Equatable {
       'participantIds': participantIds,
       'lastMessage': lastMessage,
       'lastMessageSenderId': lastMessageSenderId,
-      'lastMessageAt':
-          lastMessageAt != null ? Timestamp.fromDate(lastMessageAt!) : null,
+      'lastMessageAt': lastMessageAt?.toIso8601String(),
       'unreadCount': unreadCount,
-      'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
-      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
+      'createdAt': createdAt?.toIso8601String(),
+      'updatedAt': updatedAt?.toIso8601String(),
     };
   }
 
@@ -82,12 +73,9 @@ class ChatModel extends Equatable {
       'participantIds': participantIds,
       'lastMessage': lastMessage,
       'lastMessageSenderId': lastMessageSenderId,
-      'lastMessageAt': FieldValue.serverTimestamp(),
       'unreadCount': {
         for (final id in participantIds) id: 0,
       },
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
     };
   }
 
@@ -113,7 +101,6 @@ class ChatModel extends Equatable {
     );
   }
 
-  /// ID determinístico de chat entre dos usuarios (ordenado).
   static String chatIdFor(String uidA, String uidB) {
     final sorted = [uidA, uidB]..sort();
     return '${sorted[0]}_${sorted[1]}';
@@ -121,9 +108,14 @@ class ChatModel extends Equatable {
 
   static DateTime? _toDate(dynamic value) {
     if (value == null) return null;
-    if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value);
+    try {
+      final dynamic v = value;
+      if (v is Object && v.runtimeType.toString().contains('Timestamp')) {
+        return (v as dynamic).toDate() as DateTime?;
+      }
+    } catch (_) {}
     return null;
   }
 

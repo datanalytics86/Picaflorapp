@@ -1,9 +1,10 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/config/app_config.dart';
 import '../core/theme/app_colors.dart';
 
-/// Avatar circular con inicial de respaldo e indicador de presencia.
+/// Avatar premium — iniciales con gradiente, anillo sutil, presencia discreta.
 class PicaflorAvatar extends StatelessWidget {
   const PicaflorAvatar({
     super.key,
@@ -13,6 +14,7 @@ class PicaflorAvatar extends StatelessWidget {
     this.isOnline,
     this.showBorder = false,
     this.onTap,
+    this.useBrandGradient = false,
   });
 
   final String? photoUrl;
@@ -21,18 +23,28 @@ class PicaflorAvatar extends StatelessWidget {
   final bool? isOnline;
   final bool showBorder;
   final VoidCallback? onTap;
+  final bool useBrandGradient;
 
   String get _initials {
     final parts = displayName.trim().split(RegExp(r'\s+'));
     if (parts.isEmpty || parts.first.isEmpty) return '?';
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    if (parts.length == 1) {
+      if (parts.first.isEmpty) return '?';
+      return parts.first.substring(0, 1).toUpperCase();
+    }
     return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
+  }
+
+  Color get _baseColor => AppColors.avatarColorFor(displayName);
+
+  bool get _usePhoto {
+    if (AppConfig.demoMode || kIsWeb) return false;
+    return photoUrl != null && photoUrl!.isNotEmpty;
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasPhoto = photoUrl != null && photoUrl!.isNotEmpty;
 
     Widget avatar = Container(
       width: size,
@@ -41,46 +53,59 @@ class PicaflorAvatar extends StatelessWidget {
         shape: BoxShape.circle,
         border: showBorder
             ? Border.all(
-                color: AppColors.primary.withValues(alpha: 0.35),
+                color: AppColors.primary.withValues(alpha: 0.28),
                 width: 2,
               )
-            : null,
+            : Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.05),
+                width: 1,
+              ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: _baseColor.withValues(alpha: isDark ? 0.22 : 0.14),
+            blurRadius: size * 0.2,
+            offset: Offset(0, size * 0.05),
+            spreadRadius: -2,
           ),
         ],
       ),
       child: ClipOval(
-        child: hasPhoto
-            ? CachedNetworkImage(
-                imageUrl: photoUrl!,
+        child: _usePhoto
+            ? Image.network(
+                photoUrl!,
                 fit: BoxFit.cover,
                 width: size,
                 height: size,
-                placeholder: (_, __) => _InitialsPlaceholder(
+                errorBuilder: (_, __, ___) => _Initials(
                   initials: _initials,
                   size: size,
-                  isDark: isDark,
+                  baseColor: _baseColor,
+                  useBrandGradient: useBrandGradient,
                 ),
-                errorWidget: (_, __, ___) => _InitialsPlaceholder(
-                  initials: _initials,
-                  size: size,
-                  isDark: isDark,
-                ),
+                frameBuilder: (context, child, frame, sync) {
+                  if (sync || frame != null) return child;
+                  return _Initials(
+                    initials: _initials,
+                    size: size,
+                    baseColor: _baseColor,
+                    useBrandGradient: useBrandGradient,
+                  );
+                },
               )
-            : _InitialsPlaceholder(
+            : _Initials(
                 initials: _initials,
                 size: size,
-                isDark: isDark,
+                baseColor: _baseColor,
+                useBrandGradient: useBrandGradient,
               ),
       ),
     );
 
     if (isOnline != null) {
-      final dotSize = (size * 0.28).clamp(8.0, 14.0);
+      final dotSize = (size * 0.24).clamp(9.0, 14.0);
+      final ringColor = isDark ? AppColors.darkCard : AppColors.lightCard;
       avatar = Stack(
         clipBehavior: Clip.none,
         children: [
@@ -94,10 +119,15 @@ class PicaflorAvatar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isOnline! ? AppColors.online : AppColors.offline,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                  width: 2,
-                ),
+                border: Border.all(color: ringColor, width: 2.2),
+                boxShadow: isOnline!
+                    ? [
+                        BoxShadow(
+                          color: AppColors.online.withValues(alpha: 0.4),
+                          blurRadius: 5,
+                        ),
+                      ]
+                    : null,
               ),
             ),
           ),
@@ -116,19 +146,26 @@ class PicaflorAvatar extends StatelessWidget {
   }
 }
 
-class _InitialsPlaceholder extends StatelessWidget {
-  const _InitialsPlaceholder({
+class _Initials extends StatelessWidget {
+  const _Initials({
     required this.initials,
     required this.size,
-    required this.isDark,
+    required this.baseColor,
+    this.useBrandGradient = false,
   });
 
   final String initials;
   final double size;
-  final bool isDark;
+  final Color baseColor;
+  final bool useBrandGradient;
 
   @override
   Widget build(BuildContext context) {
+    final start = useBrandGradient ? AppColors.primary : baseColor;
+    final end = useBrandGradient
+        ? const Color(0xFF2BB8A9)
+        : AppColors.avatarColorDark(baseColor);
+
     return Container(
       width: size,
       height: size,
@@ -137,18 +174,17 @@ class _InitialsPlaceholder extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: isDark
-              ? const [Color(0xFF1E3A36), Color(0xFF16302C)]
-              : const [Color(0xFFE6F7F5), Color(0xFFD0EFEA)],
+          colors: [start, end],
         ),
       ),
       child: Text(
         initials,
         style: TextStyle(
-          fontSize: size * 0.36,
-          fontWeight: FontWeight.w600,
-          color: AppColors.primary,
+          fontSize: size * 0.34,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
           height: 1,
+          letterSpacing: 0.25,
         ),
       ),
     );

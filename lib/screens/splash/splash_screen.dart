@@ -1,64 +1,49 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 
-/// Splash minimalista con marca Picaflor.
+/// Splash mínimo — sin flutter_animate (evita jank en web al boot).
+///
+/// El router redirige de inmediato; esta pantalla casi no se ve.
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: AppColors.splashGradient,
-        ),
-        child: SafeArea(
+    if (kDebugMode) {
+      debugPrint('🖼️ SplashScreen build (should redirect ASAP)');
+    }
+
+    return const Scaffold(
+      body: ColoredBox(
+        color: Color(0xFF0C0F14),
+        child: Center(
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Spacer(flex: 3),
-              _LogoMark()
-                  .animate()
-                  .fadeIn(duration: 500.ms)
-                  .scale(
-                    begin: const Offset(0.85, 0.85),
-                    curve: Curves.easeOutBack,
-                    duration: 600.ms,
-                  ),
-              const Gap(28),
+              _LogoMark(),
+              Gap(20),
               Text(
                 AppConstants.appName,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.5,
-                    ),
-              )
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 450.ms)
-                  .slideY(begin: 0.15, end: 0),
-              const Gap(10),
-              Text(
-                AppConstants.appTagline,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.7),
-                    ),
-              ).animate().fadeIn(delay: 350.ms, duration: 450.ms),
-              const Spacer(flex: 4),
-              const SizedBox(
-                width: 28,
-                height: 28,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              Gap(16),
+              SizedBox(
+                width: 22,
+                height: 22,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
+                  strokeWidth: 2,
                   color: AppColors.primary,
                 ),
-              ).animate().fadeIn(delay: 500.ms),
-              const Gap(40),
+              ),
             ],
           ),
         ),
@@ -68,25 +53,20 @@ class SplashScreen extends StatelessWidget {
 }
 
 class _LogoMark extends StatelessWidget {
+  const _LogoMark();
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 96,
-      height: 96,
-      decoration: BoxDecoration(
+      width: 72,
+      height: 72,
+      decoration: const BoxDecoration(
         shape: BoxShape.circle,
         gradient: AppColors.primaryGradient,
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.4),
-            blurRadius: 32,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
       child: const Icon(
         Icons.pets_rounded,
-        size: 48,
+        size: 36,
         color: Colors.white,
       ),
     );

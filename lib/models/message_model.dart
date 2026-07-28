@@ -1,9 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 enum MessageType { text, image, system }
 
-/// Mensaje individual dentro de un chat.
+/// Mensaje individual dentro de un chat. Sin dependencias de Firebase.
 class MessageModel extends Equatable {
   const MessageModel({
     required this.id,
@@ -29,14 +28,6 @@ class MessageModel extends Equatable {
   bool get hasImage => type == MessageType.image && imageUrl != null;
 
   bool isMine(String currentUid) => senderId == currentUid;
-
-  factory MessageModel.fromFirestore(
-    DocumentSnapshot<Map<String, dynamic>> doc, {
-    required String chatId,
-  }) {
-    final data = doc.data() ?? {};
-    return MessageModel.fromMap(data, id: doc.id, chatId: chatId);
-  }
 
   factory MessageModel.fromMap(
     Map<String, dynamic> map, {
@@ -64,7 +55,7 @@ class MessageModel extends Equatable {
       'type': type.name,
       'imageUrl': imageUrl,
       'isRead': isRead,
-      'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
+      'createdAt': createdAt?.toIso8601String(),
     };
   }
 
@@ -76,7 +67,6 @@ class MessageModel extends Equatable {
       'type': type.name,
       'imageUrl': imageUrl,
       'isRead': false,
-      'createdAt': FieldValue.serverTimestamp(),
     };
   }
 
@@ -115,9 +105,14 @@ class MessageModel extends Equatable {
 
   static DateTime? _toDate(dynamic value) {
     if (value == null) return null;
-    if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value);
+    try {
+      final dynamic v = value;
+      if (v is Object && v.runtimeType.toString().contains('Timestamp')) {
+        return (v as dynamic).toDate() as DateTime?;
+      }
+    } catch (_) {}
     return null;
   }
 

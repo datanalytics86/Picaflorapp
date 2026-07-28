@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chat_model.dart';
@@ -57,12 +59,18 @@ class ChatController extends StateNotifier<ChatSendState> {
 
   Future<ChatModel?> openChatWith(String otherUid) async {
     final uid = _ref.read(authServiceProvider).currentUid;
-    if (uid == null || otherUid.isEmpty || uid == otherUid) return null;
+    if (uid == null || otherUid.isEmpty || uid == otherUid) {
+      state = state.copyWith(error: 'No hay sesión activa.');
+      return null;
+    }
     try {
-      return await _chat.getOrCreateChat(
-        currentUid: uid,
-        otherUid: otherUid,
-      );
+      // Demo es local; timeout 2s evita UI colgada.
+      return await _chat
+          .getOrCreateChat(
+            currentUid: uid,
+            otherUid: otherUid,
+          )
+          .timeout(const Duration(seconds: 2));
     } on ChatException catch (e) {
       state = state.copyWith(error: e.message);
       return null;

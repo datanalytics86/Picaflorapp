@@ -74,3 +74,7 @@ final onboardingDoneProvider =
     StateNotifierProvider<OnboardingNotifier, bool>((ref) {
   return OnboardingNotifier(ref.watch(sharedPreferencesProvider));
 });
+
+/// En DEMO el onboarding no debe bloquear el arranque.
+/// Override en main() cuando [AppConfig.demoMode].
+final demoOnboardingDoneProvider = Provider<bool>((ref) => true);

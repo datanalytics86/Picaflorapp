@@ -64,10 +64,13 @@
     <div>Picaflor</div>
   </div>
   <script>
-    window.addEventListener('flutter-first-frame', function () {
+    function hideLoading() {
       var el = document.getElementById('loading');
       if (el) el.remove();
-    });
+    }
+    window.addEventListener('flutter-first-frame', hideLoading);
+    // Failsafe: si el primer frame tarda, no dejar spinner eterno.
+    setTimeout(hideLoading, 4000);
   </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>

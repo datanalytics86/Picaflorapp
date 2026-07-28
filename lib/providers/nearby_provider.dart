@@ -1,9 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
 import '../core/constants/santiago_bounds.dart';
+import '../core/utils/location_privacy.dart';
 import '../data/demo_nearby.dart';
-import '../services/location_service.dart';
 import '../services/user_service.dart';
 import 'auth_provider.dart';
 import 'location_provider.dart';
@@ -24,10 +25,45 @@ class NearbyResult {
   bool get isEmpty => people.isEmpty;
 }
 
-/// Personas cercanas (Firestore o catálogo demo).
+/// Personas cercanas.
 ///
-/// Solo reacciona a lat/lon/radius — no a flips de isLoading del GPS.
-final nearbyUsersProvider =
+/// En DEMO es **síncrono** (Provider) — no hay AsyncLoading eterno.
+/// En producción usa FutureProvider con timeouts.
+final nearbyUsersProvider = Provider.autoDispose<AsyncValue<NearbyResult>>((ref) {
+  if (AppConfig.demoMode) {
+    final lat = ref.watch(
+      locationControllerProvider.select(
+        (s) => s.location?.latitude ?? SantiagoBounds.centerLatitude,
+      ),
+    );
+    final lon = ref.watch(
+      locationControllerProvider.select(
+        (s) => s.location?.longitude ?? SantiagoBounds.centerLongitude,
+      ),
+    );
+    final radius = ref.watch(
+      locationControllerProvider.select((s) => s.radiusMeters),
+    );
+    final uid = ref.watch(authServiceProvider).currentUid ?? 'local';
+
+    final people = DemoNearby.people(originLat: lat, originLon: lon)
+        .where((p) => p.user.uid != uid)
+        .where((p) => p.distanceMeters <= radius)
+        .toList(growable: false);
+
+    if (kDebugMode) {
+      debugPrint('📍 nearby DEMO sync people=${people.length}');
+    }
+    return AsyncValue.data(
+      NearbyResult(people: people, isDemo: true),
+    );
+  }
+
+  // Producción: delega al FutureProvider con red.
+  return ref.watch(_nearbyUsersRemoteProvider);
+});
+
+final _nearbyUsersRemoteProvider =
     FutureProvider.autoDispose<NearbyResult>((ref) async {
   final lat = ref.watch(
     locationControllerProvider.select(
@@ -43,41 +79,34 @@ final nearbyUsersProvider =
     locationControllerProvider.select((s) => s.radiusMeters),
   );
   final uid = ref.watch(authServiceProvider).currentUid ?? 'local';
-
-  // Demo: 100% síncrono, sin red ni Geolocator.
-  if (AppConfig.demoMode) {
-    final people = DemoNearby.people(originLat: lat, originLon: lon)
-        .where((p) => p.user.uid != uid)
-        .where((p) => p.distanceMeters <= radius)
-        .toList();
-    return NearbyResult(people: people, isDemo: true);
-  }
-
-  // Sin ubicación real aún: demos del centro de Stgo.
   final hasLocation = ref.watch(
     locationControllerProvider.select((s) => s.hasLocation),
   );
+
   if (!hasLocation) {
     return NearbyResult(
       people: DemoNearby.people(originLat: lat, originLon: lon)
           .where((p) => p.distanceMeters <= radius)
-          .toList(),
+          .toList(growable: false),
       isDemo: true,
     );
   }
 
   try {
-    final people = await ref.read(userServiceProvider).getNearbyUsers(
+    final people = await ref
+        .read(userServiceProvider)
+        .getNearbyUsers(
           currentUid: uid,
           latitude: lat,
           longitude: lon,
           radiusMeters: radius,
-        );
+        )
+        .timeout(const Duration(seconds: 8));
 
     if (people.isEmpty) {
       final demo = DemoNearby.people(originLat: lat, originLon: lon)
           .where((p) => p.distanceMeters <= radius)
-          .toList();
+          .toList(growable: false);
       return NearbyResult(people: demo, isDemo: true);
     }
 
@@ -85,7 +114,7 @@ final nearbyUsersProvider =
   } catch (_) {
     final demo = DemoNearby.people(originLat: lat, originLon: lon)
         .where((p) => p.distanceMeters <= radius)
-        .toList();
+        .toList(growable: false);
     return NearbyResult(
       people: demo,
       isDemo: true,
@@ -95,4 +124,4 @@ final nearbyUsersProvider =
 });
 
 String nearbyDistanceLabel(double meters) =>
-    LocationService.formatApproxDistance(meters);
+    LocationPrivacy.formatApproxDistance(meters);

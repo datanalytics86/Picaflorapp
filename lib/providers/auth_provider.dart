@@ -302,7 +302,7 @@ class AuthController extends StateNotifier<AuthFormState> {
     }
   }
 
-  /// Entrada rápida al modo demo (sin formularios).
+  /// Entrada rápida al modo demo (sin formularios) — path síncrono.
   Future<bool> enterDemo() async {
     state = state.copyWith(
       isLoading: true,
@@ -310,8 +310,8 @@ class AuthController extends StateNotifier<AuthFormState> {
       lastMethod: AuthMethod.email,
     );
     try {
-      await _auth.signInAsDemoGuest();
-      // Crítico: actualizar sesión ANTES de que el UI haga go(/home).
+      // signInAsDemoGuest es local/inmediato; timeout evita UI colgada.
+      await _auth.signInAsDemoGuest().timeout(const Duration(seconds: 2));
       _syncSession();
       state = state.copyWith(isLoading: false);
       return true;

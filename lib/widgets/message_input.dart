@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_colors.dart';
+import '../core/theme/app_spacing.dart';
 
-/// Barra de composición de mensaje.
+/// Barra de composición de mensaje — centrada en desktop.
 class MessageInput extends StatefulWidget {
   const MessageInput({
     super.key,
@@ -66,82 +67,90 @@ class _MessageInputState extends State<MessageInput> {
           ),
         ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 120),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? AppColors.darkSurfaceElevated
-                    : AppColors.lightBackground,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                ),
-              ),
-              child: TextField(
-                controller: _controller,
-                focusNode: _focus,
-                minLines: 1,
-                maxLines: 5,
-                textCapitalization: TextCapitalization.sentences,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _submit(),
-                decoration: InputDecoration(
-                  hintText: widget.hint,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  filled: false,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppLayout.contentMaxChat),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 120),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.darkSurfaceElevated
+                        : AppColors.lightBackground,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: isDark
+                          ? AppColors.darkBorder
+                          : AppColors.lightBorder,
+                    ),
+                  ),
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _submit(),
+                    decoration: InputDecoration(
+                      hintText: widget.hint,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 48,
-            height: 48,
-            child: Material(
-              color: _hasText || widget.isSending
-                  ? AppColors.primary
-                  : (isDark
-                      ? AppColors.darkSurfaceElevated
-                      : AppColors.lightBorder),
-              borderRadius: BorderRadius.circular(16),
-              child: InkWell(
-                onTap: _hasText && !widget.isSending ? _submit : null,
-                borderRadius: BorderRadius.circular(16),
-                child: Center(
-                  child: widget.isSending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Icon(
-                          Icons.send_rounded,
-                          size: 20,
-                          color: _hasText
-                              ? Colors.white
-                              : (isDark
-                                  ? AppColors.darkTextTertiary
-                                  : AppColors.lightTextTertiary),
-                        ),
+              const SizedBox(width: 10),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 48,
+                height: 48,
+                child: Material(
+                  color: _hasText || widget.isSending
+                      ? AppColors.primary
+                      : (isDark
+                          ? AppColors.darkSurfaceElevated
+                          : AppColors.lightBorder),
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    onTap: _hasText && !widget.isSending ? _submit : null,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Center(
+                      child: widget.isSending
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              Icons.send_rounded,
+                              size: 20,
+                              color: _hasText
+                                  ? Colors.white
+                                  : (isDark
+                                      ? AppColors.darkTextTertiary
+                                      : AppColors.lightTextTertiary),
+                            ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
