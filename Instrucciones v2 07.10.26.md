@@ -6,7 +6,7 @@
 > - este documento (la constitución y las especificaciones);
 > - [`AGENTS.md`](./AGENTS.md): resumen operativo que Grok Build carga automáticamente;
 > - [`docs/v2/TASKS.yaml`](./docs/v2/TASKS.yaml): el grafo de tareas, con dueños de paths y criterios de aceptación;
-> - [`docs/v2/AUDITORIA-07.10.26.md`](./docs/v2/AUDITORIA-07.10.26.md): los 180 hallazgos con evidencia `ruta:línea`;
+> - [`docs/v2/AUDITORIA-07.10.26.md`](./docs/v2/AUDITORIA-07.10.26.md): los 203 hallazgos con evidencia `ruta:línea` y su veredicto de verificación;
 > - [`.github/pull_request_template.md`](./.github/pull_request_template.md): el contrato de evidencia de cada PR.
 >
 > **Base auditada:** rama `grok/picaflor-v2-061026`, commit `155b6f6` (PR #1, draft). Hay que reverificar cada dato antes de actuar, porque los números de línea cambian.
@@ -118,7 +118,7 @@ Las anula **ninguna** orden posterior, incluidas "no te detengas", "hazlo todo" 
 |----|---------------|-----------|
 | **V-01** | El **CI del PR #1 está rojo** en sus 2 runs. Con Flutter 3.47.6 (el del CI) aparecen 5 warnings fatales `unawaited_return_in_try_block`. Grok validó con 3.44.7 en local y no revisó el CI. | `lib/services/auth_service_live.dart:49,76,107,161,261`; run `37550773429` |
 | **V-02** | `dart format`: **36 de 92 archivos** sin formatear. | `dart format --output=none --set-exit-if-changed .` |
-| **V-03** | **Functions no compila para deploy**: `tsc` falla con TS2441 en `src/pure.test.ts:23`. El lint (`tsc --noEmit`) pasa y da falsa confianza. No hay `predeploy` ni job de backend en el CI. | `npm run build` |
+| **V-03** | **El build de Functions sale con error**: `tsc` termina en exit 2 por TS2441 en `src/pure.test.ts:23`, aunque igual emite los `.js`. Con un `predeploy` de build, el deploy aborta. Desde un clon limpio no hay `lib/`. El lint (`tsc --noEmit`) pasa y da falsa confianza, y no hay job de backend en el CI. | `npm run build` |
 | **V-04** | **Node 20** como runtime: deprecado el 2026-04-30 y **decomisionado el 2026-10-30**. Después de esa fecha no se puede desplegar. | `functions/package.json:5-7` |
 | **V-05** | **`updateLocation` siempre falla**: dentro de la transacción escribe y después lee, lo que Firestore prohíbe. Nadie llega a tener ubicación. | `functions/src/updateLocation.ts:34,38` |
 | **V-06** | **`birthDate` nunca llega al servidor** (queda solo en SharedPreferences), y `getNearby` oculta a quien no la tiene. Resultado: **Cerca siempre vacía**. | `lib/screens/onboarding/onboarding_screen.dart:63-69`, `functions/src/pure/nearbyFilter.ts:40` |
@@ -130,7 +130,7 @@ Las anula **ninguna** orden posterior, incluidas "no te detengas", "hazlo todo" 
 | **V-12** | **Denial-of-wallet y costo**: `getNearby` hace hasta **~6.400 lecturas por llamada** y no tiene rate limit. Con densidad, Cerca cuesta **US$0,15–0,21 por MAU al mes**, más que el ingreso esperado de Plus (~US$0,10/MAU). | `functions/src/getNearby.ts:13,54-87` |
 | **V-13** | **Radio vendido no entregado**: la consulta geohash p5 3×3 garantiza solo ~4,08 km E-O en Santiago. Cobertura real: 5 km = 93,7% y **10 km (Plus) = 5,8%**. | `functions/src/pure/geohash.ts:11,139-142` |
 | **V-14** | **Los íconos de la app son el logo de Flutter** en Android, iOS y web (md5 idéntico a la plantilla). | `web/icons/Icon-512.png` |
-| **V-15** | Se exige aceptar **Términos que no existen**: no hay `/terminos` y el dominio difiere del de la política de privacidad. | `lib/core/config/app_config.dart:29-31` |
+| **V-15** | Se exige aceptar **Términos que no existen**: no hay `/terminos` y el dominio difiere del de la política de privacidad. Tampoco hay normas de comunidad ni estándares CSAE (seguridad infantil, exigidos por Google Play a las apps sociales). La URL de privacidad por defecto responde **404** porque el Hosting no está desplegado. | `lib/core/config/app_config.dart:29-31`; `curl https://picaflorapp.web.app/privacidad` |
 | **V-16** | **Onboarding**: "Siguiente" en el paso 2 llama a `_finish()` y deja a la persona trabada. | `onboarding_screen.dart:83` (`_pages.length` = 2, `_stepCount` = 3) |
 
 ### 2.3 Lo que se declaró "Hecho" y no lo está
@@ -146,7 +146,7 @@ Las anula **ninguna** orden posterior, incluidas "no te detengas", "hazlo todo" 
 | BASELINE | Línea base | Se generó **después** de los cambios, sin métricas del "antes", con gates sin correr y reglas sin ejecutar. |
 | Proceso | §13 | Un solo commit de 132 archivos (unas 4,2k líneas escritas a mano, ~10× el tope). Los 12 roles fueron etiquetas, sin red team ni verificación cruzada. |
 
-**Resumen de los 36 ítems de la v1:** 13 hechos · 16 parciales · 5 no hechos · 2 falsos. **Hallazgos nuevos:** 180 (35 P0). El conteo exacto por lente está en el anexo de auditoría.
+**Resumen de los 36 ítems de la v1:** 13 hechos · 16 parciales · 5 no hechos · 2 falsos. **Hallazgos nuevos:** 203 (46 P0, con duplicados entre lentes consolidados en V-01..V-16). De los 68 P0/P1 de código verificados adversarialmente: 54 confirmados, 14 parciales con corrección y **0 refutados**. El conteo exacto por lente está en el anexo de auditoría.
 
 ---
 
@@ -467,7 +467,8 @@ Se quita el `maxInstances: 20` global.
 6. Protocolo de brechas: runbook, responsables, plazos de notificación (verificar en la ley) y plantilla de aviso.
 7. Política de retención ejecutable (TTL y jobs de §7.1) que coincida con la política publicada.
 8. Encargado o delegado de protección de datos (decisión humana).
-9. Términos (`web/terminos.html`) y Privacidad v2 en **el mismo dominio**, con rewrites en Hosting. Los textos finales los firma un abogado (I13).
+9. En **un mismo dominio**, con rewrites en Hosting: Términos (`/terminos`, EULA con tolerancia cero), Privacidad v2 (`/privacidad`, con el contenido mínimo de la ley: responsable, finalidades, bases, categorías, plazos, encargados como Google/CARTO/RevenueCat, transferencias, derechos y canal), Normas de la comunidad (`/normas-comunidad`), **Estándares contra la explotación y el abuso sexual infantil** (`/seguridad-infantil`, con contacto designado, como exige Google Play) y Borrado (`/eliminar-cuenta`). Un job de CI verifica HTTP 200 de las 5 URLs en staging antes de cada release. Los textos finales los firma un abogado (I13).
+10. Canal de derechos ARCOP + bloqueo con plazo de respuesta y registro de solicitudes. Persona designada para cumplimiento (D-12). Multas de hasta 20.000 UTM en infracciones gravísimas (fuente secundaria; validar con un abogado).
 
 **Borrado durable:**
 - `deleteAccount` solo encola `deletionRequests/{uid}`. El worker idempotente (trigger con reintentos o Cloud Tasks, `BulkWriter`, `recursiveDelete`) borra:
@@ -478,13 +479,17 @@ Se quita el `maxInstances: 20` global.
   - entitlements y el subscriber en RevenueCat;
   - `rateLimits` y `fcmTokens`.
 - Se conserva solo la evidencia legal mínima declarada (consentimientos y ledger contable seudonimizado).
-- `revokeRefreshTokens`. El cliente hace `signOut` **solo local**. Un test de barrido exige 0 documentos con el uid salvo los declarados.
+- `revokeRefreshTokens` y **revocación del token de Sign in with Apple** (REST de Apple, requisito de Apple al borrar la cuenta). El cliente hace `signOut` **solo local**.
+- **Anti-zombie:** las reglas de Firestore **no** revisan la revocación de tokens, así que toda escritura exige `!exists(/databases/$(database)/documents/deletionRequests/$(request.auth.uid))`, y los callables rechazan si existe `deletionRequests/{uid}` o si `getUser(uid)` falla. Un test de barrido exige 0 documentos con el uid salvo los declarados, incluso si el cliente sigue escribiendo con el token viejo.
 - Si hay una suscripción activa se avisa: "Tu suscripción sigue activa en la tienda: cancélala aquí".
 
 **Export:** JSON con fechas ISO-8601 en Storage y URL firmada de 72 h, 1 vez cada 24 h. Incluye Auth, `users`, `profiles`, `consentEvents`, celda, waves, blocks, reportes enviados, metadatos de chats y mensajes propios, entitlements y archivos. Hay test de esquema.
 
 **Moderación:**
-- `reportUser` → puntaje de prioridad (menor y sexual primero) → `moderationQueue` → consola admin mínima (custom claim `admin`).
+- `reportUser` → puntaje de prioridad (menor y sexual primero) → `moderationQueue` → consola mínima con custom claim `moderator` y **acciones auditadas** (advertir, suspender con Auth disable, banear).
+- **Preservación de evidencia:** al reportar, el servidor copia los últimos N mensajes del chat a `reports/{id}/evidence` con *legal hold*, de modo que el borrado de cuenta no los elimina.
+- **SLA por severidad, medido:** posible menor y amenazas ≤ 2 h; resto ≤ 24 h. Cada reporte genera una alerta. El copy de "lo revisamos en…" se muestra solo si la medición existe.
+- **Protocolo con autoridades y CSAM:** preservación, escalamiento y contacto designado, documentados en `docs/ops/runbooks/`.
 - Con N reportes únicos en 24 h, la persona se **oculta de Cerca** hasta la revisión.
 - El claim `banned` se respeta en reglas y callables.
 - El SLA se mide en BigQuery y hay alerta a las 20 h.
@@ -505,6 +510,10 @@ Se quita el `maxInstances: 20` global.
 | Apple | 1.2 (UGC: filtro, reporte, bloqueo, contacto publicado y acción sobre reportes); 5.1.1(v) (borrado in-app); 4.8 (Sign in with Apple, con la capability en `Runner.entitlements`); 3.1.1 y 3.1.2 (IAP y suscripciones); `PrivacyInfo.xcprivacy` (verificar si aplica). |
 | Google Play | UGC, Data safety, borrado de cuenta in-app **y vía web** (`/eliminar-cuenta` funcional, no solo informativo) y Play Billing (User Choice Billing no está disponible en Chile). |
 | Ambas | `docs/store/data-map.md` (dato → propósito → Privacy Label / Data safety), cuestionario de edad, notas de revisión con **cuentas de prueba reales en una geocerca de revisión** (sin datos demo en producción) y `fastlane/metadata` en es-CL. |
+
+**Auth por teléfono:** política de regiones SMS restringida a +56, cuotas y alerta de costo de OTP para frenar el *SMS pumping*. App Check también en Auth (si aplica a la versión verificada).
+
+**Licencias:** `LicenseRegistry.addLicense` para Inter (OFL), visible en la página de licencias.
 
 **Hosting:** cabeceras CSP compatibles con Flutter web, `frame-ancestors 'none'`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: geolocation=(self)` y `X-Content-Type-Options: nosniff`. Se verifican con `curl -I` en el preview channel.
 
@@ -600,16 +609,18 @@ La propuesta de la v1 ($4.990/mes) queda en ~37% de BFF.
 - Toolchain fijado.
 - Jobs: format, analyze, test + cobertura con umbral, gates, build web demo (presupuesto de bundle), backend, emuladores, E2E del loop, build Android (release sin firma con keystore efímero) y build iOS `--no-codesign` (runner macOS).
 - Preview channels de Hosting en dev.
-- **OIDC / Workload Identity** en vez del JSON de service account.
-- Dependabot o Renovate, secret scanning, CodeQL (TS), SBOM y chequeo de licencias.
+- **OIDC / Workload Identity** en vez del JSON de service account. Actions **fijadas por SHA** y `permissions: contents: read` por defecto.
+- **CD por canales:** tag → staging → prod con una GitHub Environment que exija revisor; Play internal testing (fastlane `supply`) y TestFlight (fastlane `pilot`) automatizados con Play App Signing; `versionCode` derivado del CI.
+- Dependabot semanal (pub, npm ×2 y actions), secret scanning con push protection + gitleaks en CI, CodeQL (TS), `npm audit --omit=dev --audit-level=high` como gate, SBOM CycloneDX por release y chequeo de licencias.
 - `concurrency` por rama.
 
 **Observabilidad:**
 - Crashlytics y Performance Monitoring sin PII.
 - Logs estructurados (`callable`, `latency_ms`, `reads`, `result`).
 - **SLOs:** usuarios sin crash ≥ 99,5%; `getNearby` p95 < 800 ms; error de callables < 1%; push entregados ≥ 95%.
-- Alertas, *error budget*, PITR / backups programados de Firestore.
-- Runbooks: incidente, abuso, pico de costo, brecha de datos y revisión de la tienda.
+- Alertas (error de callables > 2% en 5 min, p95 de `getNearby` sobre el objetivo, reportes de posible menor sin triage > 2 h, budget al 50/90/100%) y *error budget*. Logs con `uidHash = HMAC(uid)`, nunca el uid en claro.
+- **PITR activado + export diario** en la misma región, con un **simulacro de restauración** probado y registrado.
+- `docs/ops/`: matriz de severidad, on-call (titular y respaldo) y runbooks (`getNearby` degradado, App Check, pico de costo, brecha de datos, abuso masivo, CSAM, solicitud de autoridad, restauración, revisión de tienda), más plantillas de comunicación a usuarios y a la Agencia de Protección de Datos. Simulacro trimestral.
 
 **App Check:**
 - Pedir el **aumento de cuota de Play Integrity** (10k/día por defecto; el aumento tarda hasta 1 semana) **≥ 2 semanas antes de la beta**.
@@ -672,6 +683,9 @@ La propuesta de la v1 ($4.990/mes) queda en ~37% de BFF.
 14. Replay de un token de App Check.
 15. UI con texto al 200% en 320 px; TalkBack en el loop.
 16. Instalar un build de release con `DEMO_MODE` por defecto.
+17. Escribir en Firestore con el token viejo después de pedir el borrado de la cuenta (zombie).
+18. *SMS pumping*: pedir OTP a números fuera de +56 o en ráfaga.
+19. Borrar la cuenta para destruir la evidencia de un reporte (el *legal hold* debe sobrevivir).
 
 ---
 
@@ -752,6 +766,7 @@ Verificados al 07-10-2026. Todo lo posterior a esa fecha hay que revisarlo de nu
 | IVA a servicios digitales | 19% | SII |
 | Google Play User Choice Billing en Chile | no elegible | support.google.com/googleplay/android-developer/answer/13821247 |
 | Ley 21.719 | plena vigencia el **2026-12-01** (55 días) | v1 §S12. **Validar con un abogado.** |
+| URL de privacidad por defecto (`picaflorapp.web.app/privacidad`) | HTTP 404 "Site Not Found" (Hosting sin desplegar) | `curl`, lente de production readiness |
 | Retracto en contratos electrónicos | 10 días; se puede excluir en servicios si se informa antes del pago | Ley 19.496 / 21.398. **Validar con un abogado.** |
 
 *Picaflor 🐦: primero que funcione y sea seguro, después que sea bello y al final que se pague solo. Las tres cosas, medidas.*

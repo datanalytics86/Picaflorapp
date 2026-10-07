@@ -10,14 +10,14 @@
 | Lente | Prefijo | Hallazgos | P0 | P1 | P2 | Verificación |
 |-------|---------|-----------|----|----|----|--------------|
 | Código Flutter (lib/, test/, CI) | FL | 31 | 5 | 20 | 6 | confirmed: 22, partial: 3 |
-| Backend Firebase (reglas, Functions, índices) | BE | 27 | 7 | 14 | 6 | sin verificar: 21 |
-| Cumplimiento del megaprompt v1 | CV | 26 | 7 | 15 | 4 | sin verificar: 22 |
+| Backend Firebase (reglas, Functions, índices) | BE | 27 | 7 | 14 | 6 | confirmed: 15, partial: 6 |
+| Cumplimiento del megaprompt v1 | CV | 26 | 7 | 15 | 4 | confirmed: 17, partial: 5 |
 | Escalabilidad y costo | SC | 25 | 5 | 17 | 3 | no aplica (estrategia) |
 | Monetización y crecimiento | MO | 19 | 1 | 14 | 4 | no aplica (estrategia) |
 | Producto y diseño Tier-1 | T1 | 34 | 6 | 23 | 5 | no aplica (estrategia) |
 | Orquestación multi-agente y ejecución de Grok | AG | 18 | 4 | 12 | 2 | no aplica (estrategia) |
-| Production readiness: SRE, seguridad, QA y cumplimiento | PR | — | — | — | — | sin resultado |
-| **Total** | | **180** | **35** | **115** | **30** | |
+| Production readiness: SRE, seguridad, QA y cumplimiento | PR | 23 | 11 | 10 | 2 | no aplica (estrategia) |
+| **Total** | | **203** | **46** | **125** | **32** | |
 
 Nota: varias lentes reportan el mismo problema desde ángulos distintos (por ejemplo App Check aparece como FL-01, BE-02, CV-07 y SC-04).
 Los IDs consolidados de la §2 de las Instrucciones v2 (V-01..V-16) agrupan esos duplicados.
@@ -341,152 +341,158 @@ Además, `getNearby` no escala: hasta ~6.400 lecturas por llamada, trunca usuari
 
 **Hallazgos**
 
-### BE-01 · P0 · ops · sin verificar
+### BE-01 · P0 · ops · ✅ confirmado
 **Build de functions roto, sin predeploy y sin CI de backend: deploy no reproducible**
 
 - **Evidencia:** functions/src/pure.test.ts:23 (`const require = createRequire(__filename)` → TS2441, reproducido con tsc --outDir en scratch); functions/tsconfig.json:18 incluye src/**/*.ts (tests incluidos); firebase.json:9-21 sin `predeploy`; .github/workflows/ci.yml sin ningún job de functions ni firestore-tests; docs/BASELINE.md:36-44 (solo se corrió npm test)
 - **Detalle:** `npm run build` sale con código ≠0. Si se agrega el predeploy estándar (lint+build), `firebase deploy` falla. Sin predeploy se despliega un `lib/` local que está en .gitignore, así que no hay build reproducible desde un clone limpio. Como el CI no corre lint, build, tests ni el emulador, el error llegó a la rama sin detectarse. `npm run lint` (tsc --noEmit) pasa y da falsa confianza.
 - **Recomendación:** Crear tsconfig.build.json que excluya src/**/*.test.ts (o renombrar `require` en el test). Agregar en firebase.json `predeploy: ["npm --prefix \"$RESOURCE_DIR\" run lint", "npm --prefix \"$RESOURCE_DIR\" run build"]`. Crear un job CI `backend` con npm ci, lint, build, test y `firebase emulators:exec --only firestore,storage,auth,functions` corriendo las reglas y la integración; el job bloquea el merge. Criterio: `npm run build` sale con 0 en CI, con el log adjunto.
 
-### BE-02 · P0 · bug · sin verificar
+### BE-02 · P0 · bug · ✅ confirmado
 **Callables con enforceAppCheck:true pero el cliente no integra App Check: todos los callables fallan en producción**
 
 - **Evidencia:** functions/src/https.ts:5-8 (`enforceAppCheck: true` en callableOptions, usado por los 9 callables); pubspec.yaml (bloque dependencies) sin firebase_app_check; `grep -rn AppCheck lib web` → 0 resultados; docs/adr/0003-app-check-fail-closed.md
 - **Detalle:** En producción, updateLocation, getNearby, sendWave, respondWave, blockUser, deleteAccount, exportMyData y touchActivity responden `unauthenticated`/App Check inválido. Cerca, el bucle de saludos, el bloqueo, el borrado de cuenta (Apple 5.1.1(v) y política de Google Play) y el export (Ley 21.719) no funcionan. El ADR lo atribuye a la configuración de consola, pero falta el SDK en el cliente: no basta con 'que el humano lo configure'.
 - **Recomendación:** Integrar `firebase_app_check` (Play Integrity en Android, App Attest con fallback DeviceCheck en iOS, reCAPTCHA Enterprise en web, proveedor debug en dev/emulador) antes de cualquier llamada. Forzar App Check también en Firestore y Storage (pasos en DEPLOY.md). Usar `consumeAppCheckToken: true` en deleteAccount, sendWave y exportMyData. Criterio: test de humo contra el emulador y un staging real que llame cada callable con token válido (OK) y sin token (rechazado).
 
-### BE-03 · P0 · bug · sin verificar
+### BE-03 · P0 · bug · 🟡 parcial
 **Las reglas de profiles niegan los payloads reales del cliente: no se puede editar perfil, visibilidad ni foto**
 
 - **Evidencia:** lib/services/user_service_live.dart:83-91 (`updateProfile` siempre agrega 'updatedAt'); lib/services/user_service_live.dart:44 (`createUser` agrega 'age'); firestore.rules:69-71 (`profileClientKeys` sin updatedAt ni age) y 136-138. Verificado en el emulador: set merge {isVisible:false, updatedAt} → DENY; create con age → DENY; sin updatedAt → ALLOW
 - **Detalle:** Toda edición de perfil, el toggle 'Visible en Cerca' y la foto desde Google/Apple (auth_service_live.dart:333) fallan con PERMISSION_DENIED en producción. El cliente traga el error con debugPrint. Los tests de reglas no lo detectaron porque no usan los payloads del cliente. Además, `age` no puede vivir en profiles, así que la tarjeta 'Camila, 29' de la spec no se puede mostrar.
 - **Recomendación:** Alinear el contrato: o `updatedAt` en profileClientKeys con `== request.time`, o que el cliente no lo envíe. `age` (o ageBucket) lo escribe solo el servidor, derivado de birthDate. Agregar tests de contrato: por cada escritura del cliente, un test de reglas con el payload EXACTO que arma el código Dart (allow) y variantes maliciosas (deny).
+- **Verificación (partial):** Las reglas de profiles niegan toda llamada a updateProfile porque el cliente siempre envía updatedAt (user_service_live.dart:83-85), que no está en profileClientKeys (firestore.rules:70). Fallan la edición de perfil, el toggle de visibilidad y la foto o el nombre desde Google/Apple. El error no se traga: la UI muestra un engañoso 'No se pudo guardar. Revisa tu conexión.' (user_provider.dart:73-77) o 'No se pudo actualizar la visibilidad.' (:86). En el login (auth_service_live.dart:329/333) la excepción aborta el inicio de sesión de un usuario que vuelve con nombre o foto vacíos. Lo de age es latente: ningún flujo real envía age a createUser. El problema de fondo es que age no puede vivir en profiles, así que la tarjeta 'Nombre, edad' no se puede mostrar.
 
-### BE-04 · P0 · bug · sin verificar
+### BE-04 · P0 · bug · ✅ confirmado
 **birthDate nunca se persiste en Firestore y getNearby oculta a quien no la tiene: Cerca vacía para todos**
 
 - **Evidencia:** lib/screens/onboarding/onboarding_screen.dart:63-69 (birthDate solo va a SharedPreferences); `grep birth lib/services` → 0 escrituras; functions/src/pure/nearbyFilter.ts:40 (`if (!candidate.birthDate || !isAdult(...)) continue`); getNearby.ts:169 lee users.birthDate
 - **Detalle:** En producción ningún usuario tiene `users/{uid}.birthDate`, así que `filterNearbyPeople` descarta a todos y Cerca siempre devuelve []. Tampoco se guardan consentimientos en el servidor. La verificación 18+ existe solo en el dispositivo y se pierde al reinstalar.
 - **Recomendación:** Crear el callable `completeOnboarding({birthDate, consents:{terms,privacy,analytics,version}})`: valida 18+ en el servidor, escribe birthDate (inmutable después), deriva `profiles.age`, registra el consentimiento append-only con serverTimestamp, y el cliente lo llama antes de habilitar Cerca. Test de integración en el emulador: un usuario recién onboardeado y visible aparece en getNearby de otro usuario cercano.
 
-### BE-05 · P0 · security · sin verificar
+### BE-05 · P0 · security · ✅ confirmado
 **Trilateración: la celda p7 de cualquier usuario (~127×153 m) se recupera en ≤9 sondas; también se puede scrapear el directorio**
 
 - **Evidencia:** functions/src/updateLocation.ts:13-20 + pure/grid.ts:13-27 (acepta cualquier lat/lon del planeta, sin límites de servicio ni chequeo de velocidad); pure/rateLimit.ts:1 (solo 20 s); getNearby.ts:30-183 (sin rate limit, devuelve uid + distanceBucket calculado entre centros de celdas p7); pure/distance.ts:22-29 (umbral de 150 m). Simulación con las funciones de Grok: 30/30 objetivos localizados a su celda p7 exacta, mediana 8 y máximo 9 sondas (≈3 min por cuenta)
 - **Detalle:** Un atacante con sesión mueve su posición declarada (cada 20 s y a cualquier punto), llama getNearby sin límite y observa el bucket del uid objetivo. La búsqueda adaptativa fija la celda exacta. De noche esa celda es la cuadra de la casa de la víctima, y con varias cuentas el ataque se paraleliza. Además, como getNearby devuelve uids y `profiles` se puede leer por uid, recorrer Santiago (~20 posiciones) arma un directorio completo de nombres, fotos y zonas. El threat model (docs/security/threat-model.md) no lo contempla. S1 queda cerrado en las reglas, pero sigue abierto por esta vía.
 - **Recomendación:** (a) updateLocation: polígono o bbox del Gran Santiago en el servidor, velocidad plausible (p. ej. ≤150 km/h entre updates; si no se cumple, se rechaza y la cuenta queda congelada 10 min), máximo ~20 celdas distintas por día. (b) Distancia calculada desde la celda de consulta p6 del que mira (no desde su p7) con bucket mínimo 'menos de 1 km', y ruido estable por par HMAC(viewer,target,día). (c) Rate limit persistente en getNearby (p. ej. 10/min y 60/h por uid). (d) Agregar al CI el script de simulación como test: tras 100 sondas, la incertidumbre del atacante debe seguir ≥500 m. (e) Opcional: ids opacos por viewer.
 
-### BE-06 · P0 · ops · sin verificar
+### BE-06 · P0 · ops · ✅ confirmado
 **Runtime Node 20 (EOL 2026-04-30) para un lanzamiento en Q4-2026**
 
 - **Evidencia:** functions/package.json:5-7 (`engines.node: "20"`), :19 @types/node 20.17.30
 - **Detalle:** Node 20 ya no recibe parches de seguridad. El calendario de runtimes de Cloud Functions marca deprecación y luego decommission. Supuesto a verificar: si el patrón es deprecación + 6 meses, el decommission de nodejs20 caería alrededor del 2026-10-30, y crear funciones nuevas en un runtime deprecado puede quedar bloqueado. El proyecto todavía no tiene funciones desplegadas.
 - **Recomendación:** Subir a nodejs22 como mínimo, o nodejs24 si Cloud Functions y firebase-functions lo soportan (verificar en cloud.google.com/functions/docs/runtime-support y con `npm view firebase-functions version`). Alinear @types/node, fijar versiones y registrar el ADR. Criterio: `firebase deploy --only functions --dry-run` OK en el runtime nuevo.
 
-### BE-07 · P0 · gap · sin verificar
+### BE-07 · P0 · gap · 🟡 parcial
 **Bucle central de saludos sin conectar en producción; falta índice y respondWave crea chats invisibles**
 
 - **Evidencia:** lib/features/waves/wave_actions.dart:23-43 y wave_models.dart:39-41 (saludos entrantes y cupo desde `memoryWaves` en memoria; ids 'wave_N'); `grep collection('waves') lib` → 0; firestore.indexes.json sin (to,status,createdAt); waves.ts:128-137 (chat nuevo sin `lastMessageAt`); lib/services/chat_service_live.dart:45-46 (`orderBy('lastMessageAt')` excluye documentos sin ese campo)
 - **Detalle:** El receptor nunca ve los saludos reales de Firestore. respondWave recibe ids en memoria que no existen y devuelve not-found. Aunque se aceptara, el chat creado no tiene lastMessageAt y no aparece en la lista de chats de ninguno de los dos hasta el primer mensaje. Si existía un chat previo en 'blocked', aceptar no lo reactiva. El loop 'ver → saludar → aceptar → chat', que es la North Star, no funciona en producción.
 - **Recomendación:** El cliente escucha `waves where to==uid && status=='pending' orderBy createdAt desc limit 50` (agregar el índice compuesto). respondWave escribe `lastMessageAt = createdAt` y reactiva `status` si no hay bloqueo. Test e2e en el emulador: sendWave → aparece en el listener del receptor → respondWave → el chat aparece en watchUserChats de ambos.
+- **Verificación (partial):** El bucle de saludos no funciona en producción por algo más básico que ids en memoria: no existe UI ni código que liste los saludos recibidos ni que llame a respondWave (safety_service_live.dart:20 no tiene llamadores; incomingPending no se usa). El receptor nunca ve ni acepta un saludo. Si se conectara, el chat que crea respondWave no tiene lastMessageAt y queda fuera de watchUserChats hasta el primer mensaje, y un chat previo en 'blocked' no se reactiva. Para el listener recomendado hay que crear el índice (to,status,createdAt).
 
-### BE-08 · P1 · false_claim · sin verificar
+### BE-08 · P1 · false_claim · ✅ confirmado
 **Las celdas de consulta 3×3 de geohash p5 no cubren el radio: Plus paga 10 km y recibe ~5-6 km**
 
 - **Evidencia:** functions/src/pure/geohash.ts:5-11 (comentario: 'cover the 10 km Plus radius') y :139-142; pure/distance.ts:31-37. Simulación con queryPrefixesFor y storedGeohash de Grok (400 posiciones × 36 rumbos): cobertura 4 km 100%, 5 km 93,7%, 7 km 56,7%, 10 km 5,8%
 - **Detalle:** Una celda p5 en Santiago mide ≈4,08 km (E-O) × 4,89 km (N-S). El bloque 3×3 garantiza solo ~4 km. Desde el borde de la celda, el radio gratis de 5 km ya pierde el 6% de los puntos y el de 10 km de Plus pierde el 94%. El bucket 'km10' casi nunca aparece. Vender un beneficio que no se entrega es un riesgo de publicidad engañosa (Ley 19.496) y de reembolsos.
 - **Recomendación:** Elegir la precisión de las celdas según el radio (p6 para ≤1,2 km, p5 para ≤4 km, p4 o anillo k=2 de p5 para 10 km) o usar H3 res 7/8 con k-ring. Test de propiedad: para posiciones aleatorias en Santiago, ≥99,9% de los puntos a distancia ≤ radio están dentro de las celdas consultadas, para cada preset (500 m, 1, 2, 5 y 10 km).
 
-### BE-09 · P1 · scalability · sin verificar
+### BE-09 · P1 · scalability · ✅ confirmado
 **getNearby: hasta ~6.400 lecturas por llamada, truncado lexicográfico en zonas densas, sin TTL ni paginación, y N+1 en el cliente**
 
 - **Evidencia:** functions/src/getNearby.ts:13 (PER_PREFIX_LIMIT=150 sin orderBy), :54-61 (9 queries por rango), :80-87 (3 getAll por candidato + 2 queries de waves con limit 500), :132 (devuelve todos los resultados, sin límite); lib/services/user_service_live.dart:133 (`await getUser(uid)` secuencial por persona); no hay TTL en locations (firestore.indexes.json:37)
 - **Detalle:** Peor caso: 9×150 + 3×1.350 + 2×500 + 2 ≈ 6.400 lecturas facturables y latencia alta (São Paulo + getAll en serie). Como `limit(150)` sin orden toma los primeros geohash lexicográficos, en el centro de Santiago se devuelve una subzona fija de cada celda, llena de usuarios inactivos (las ubicaciones nunca expiran), y se descartan personas activas cercanas. El bug B5 vuelve en otra forma. Encima el cliente hace hasta 50 lecturas de perfil en serie. Estimación (supuesto de US$0,06 por 100k lecturas): con 10k DAU × 5 llamadas × ~2.000 lecturas son ~US$1.800 al mes solo en Cerca. Sin rate limit es además un vector de abuso de costos.
 - **Recomendación:** Crear `nearbyIndex/{uid}` desnormalizado y mantenido por triggers y callables: cell, visible, adult, lastActiveAt, boostUntil y la tarjeta pública mínima. Query `where cell in [...]` + `lastActiveAt >= now-7d` + `orderBy lastActiveAt desc` + limit, con índice compuesto. TTL `expireAt` en locations/nearbyIndex. Respuesta paginada (máximo 50 + cursor) con la tarjeta incluida, sin N+1. Presupuesto verificable: p95 ≤300 lecturas y ≤800 ms por llamada en el emulador con un seed de 20k usuarios en Santiago.
 
-### BE-10 · P1 · security · sin verificar
+### BE-10 · P1 · security · 🟡 parcial
 **Mensajes: claves y createdAt libres, sin chequeo de bloqueos en reglas, y bloqueo directo que deja el chat activo**
 
 - **Evidencia:** firestore.rules:161-171 (no hay keys().hasOnly ni validación de createdAt), :174-178 (el cliente crea y borra blocks con cualquier payload). Verificado en el emulador: mensaje con createdAt 2099, type 'system', imageUrl y blob de 500 KB → ALLOW; bloqueo por escritura directa en blocks/bob/blocked/alice y luego alice escribe en el chat activo → ALLOW; block con payload de 400 KB → ALLOW
 - **Detalle:** Se pueden falsificar el orden y la paginación (createdAt futuro fija un mensaje arriba), inyectar mensajes 'system' o imágenes externas que el cliente puede renderizar, y meter documentos de hasta 1 MB (costo y crash en el cliente). Mensajes tras bloqueo: hoy se cierran solo si el bloqueo pasa por la callable blockUser (que cambia chat.status). Si el bloqueo se escribe directo (permitido por las reglas) o la callable falla después del set (blockUser.ts:15-25 no es atómico), el bloqueado sigue escribiendo. No hay unblock que restaure el chat.
 - **Recomendación:** Reglas: `keys().hasOnly(['senderId','text','type','createdAt','chatId','imageUrl','isRead'])`, `createdAt == request.time`, `type == 'text'`, `imageUrl == null`, y `!blockedEitherWay(otro)` calculando el otro desde participantIds. Bloqueos solo por callable (cliente create/delete=false) o con un trigger onCreate de blocks que marque el chat. blockUser en batch atómico. Callable `unblockUser`. Tests deny para cada caso de esta lista.
+- **Verificación (partial):** Las reglas de mensajes no limitan claves, type ni createdAt (firestore.rules:163-169). Un participante puede fechar mensajes en el futuro, inflar documentos hasta ~1 MB e inyectar type 'system', que el cliente muestra como aviso oficial centrado (chat_bubble.dart:26-36). Eso es spoofing de avisos del sistema. imageUrl hoy no se renderiza. El chequeo de bloqueo depende solo de chat.status: blockUser no es atómico (blockUser.ts:15 set y :21 update separados) y las reglas no consultan blocks, así que si el update falla el bloqueado sigue escribiendo. La escritura directa de blocks solo la puede hacer el propio bloqueador saltándose el cliente: es un riesgo de integridad y tamaño (payload libre de 400 KB), no de acoso. No existe unblock que restaure el chat.
 
-### BE-11 · P1 · security · sin verificar
+### BE-11 · P1 · security · 🟡 parcial
 **El dueño puede escribir libremente lastActiveAt, birthDate y consents: presencia falsa, edad mutable y consentimiento sin valor probatorio**
 
 - **Evidencia:** firestore.rules:18-36 y 121-126 (userKeys incluye lastActiveAt, birthDate, consents y settings sin validar contenido). Verificado en el emulador: lastActiveAt=2099 → ALLOW; reescribir birthDate → ALLOW; consents con ts 'whatever' → ALLOW. functions/src/touchActivity.ts:10,15-17 (fija profiles.activityBucket='ahora' para siempre, sin rate limit)
 - **Detalle:** Un usuario aparece 'ahora' permanentemente (B4 sigue abierto) y sube en ranking. Puede cambiar su fecha de nacimiento después de un reporte de 'posible menor'. Los consentimientos escritos por el cliente no sirven como evidencia ante la Ley 21.719, que rige en plenitud desde el 1-12-2026, en 55 días. profiles.activityBucket nunca decae.
 - **Recomendación:** Sacar lastActiveAt, birthDate y consents de los campos escribibles por el cliente. birthDate se escribe vía completeOnboarding y es inmutable. consents va a `users/{uid}/consentEvents/{id}` append-only con serverTimestamp y versión. touchActivity limitado a 1 cada 5 min. activityBucket se calcula al leer, no se persiste. Tests deny.
+- **Verificación (partial):** El dueño puede escribir libremente lastActiveAt (un valor futuro da 'ahora' permanente en Cerca y evita salir a los 7 días), birthDate (mutable después de un reporte de menor; hoy además es la única vía para aparecer en Cerca, ver BE-04) y consents (sin valor probatorio ante la Ley 21.719, vigente desde el 1-12-2026). profiles.activityBucket queda en 'ahora' para siempre tras cualquier touchActivity y así se muestra en el chat y en la ficha. No hay efecto de ranking: getNearby ordena por distancia.
 
-### BE-12 · P1 · monetization · sin verificar
+### BE-12 · P1 · monetization · ✅ confirmado
 **Plus sin enforcement completo en servidor: incógnito gratis y la mayoría de los beneficios sin backend**
 
 - **Evidencia:** firestore.rules:62,70 (isVisible escribible por cualquier usuario, verificado ALLOW); getNearby.ts:30-52 (no valida que el que mira sea visible o Plus); pure/nearbyFilter.ts:41; no existen callables ni campos para filtros avanzados, visitas al perfil, Destacar 30 min, deshacer saludo ni explorar otra comuna
 - **Detalle:** Cualquiera se pone isVisible=false y sigue viendo a todos sin aparecer, que es exactamente el beneficio 'Modo incógnito' de Plus (paywall bypass). Del paquete Plus solo están en servidor los saludos ilimitados, la nota y el radio (este último roto, ver BE-08). Tampoco hay métricas de liquidez en servidor (personas activas ≤3 km por sesión y por comuna), que son el gate para encender Plus según la §7.1.
 - **Recomendación:** Separar `isVisible` (gratis: quien no aparece tampoco ve) de `incognito` (lo escribe solo el servidor según el entitlement). getNearby rechaza ver si el que mira no es visible ni Plus. Backend para boost (`boostUntil` en nearbyIndex y ledger de créditos), profileViews, cancelWave y filtros por edad/intereses en getNearby. Agregado diario de liquidez sin PII por celda p5/comuna (colección metrics o export a BigQuery). Tests de bypass desde el cliente.
 
-### BE-13 · P1 · monetization · sin verificar
+### BE-13 · P1 · monetization · ✅ confirmado
 **revenuecatWebhook: secreto fuera de Secret Manager, el boost pisa Plus, eventos sandbox o desordenados alteran entitlements**
 
 - **Evidencia:** functions/src/revenuecatWebhook.ts:12-15 (`process.env.REVENUECAT_WEBHOOK_SECRET` sin defineSecret ni `secrets:[]`), :42-57 (set merge plan/expiresAt sin comparar event_timestamp_ms); pure/revenuecat.ts:10,20-26 (solo EXPIRATION quita acceso; un producto sin 'plus' y sin entitlement_ids da plan 'free' y expiresAt null)
 - **Detalle:** La comparación timing-safe está bien, pero el secreto queda en .env en texto plano o undefined (el webhook queda siempre en 401). Si un usuario Plus compra `boost_30m` (NON_RENEWING_PURCHASE, sin entitlement), el evento escribe plan 'free' y pierde Plus hasta la próxima renovación (reembolsos y reclamos). No se filtra environment SANDBOX: compras de TestFlight o tester gratuitas darían Plus en producción. Un evento viejo reintentado pisa el estado nuevo. TRANSFER o SUBSCRIBER_ALIAS sin app_user_id devuelven 400 y RevenueCat reintenta. Un app_user_id `$RCAnonymousID` crea entitlements huérfanos. webhookEvents crece sin TTL. Latente porque Plus está apagado (ADR 0002), pero bloquea encenderlo.
 - **Recomendación:** `defineSecret('REVENUECAT_WEBHOOK_SECRET')` + `secrets:[...]`. Tras autenticar, reconciliar con la API REST de RevenueCat (GET /v1/subscribers/{id}) como fuente de verdad en vez de mapear tipos de evento. Ignorar SANDBOX en el proyecto prod. Los consumibles van a un ledger `boostCredits` que nunca toca `plan`. Verificar que el uid exista en Auth. TTL de 90 días en webhookEvents. Tests: el boost no pisa Plus, un evento viejo no pisa uno nuevo, un duplicado es idempotente, Bearer inválido da 401 y TRANSFER se maneja.
 
-### BE-14 · P1 · security · sin verificar
+### BE-14 · P1 · security · ✅ confirmado
 **sendWave: cupo y duplicado con condición de carrera, sin cooldown tras 'ignored' y sin validar destinatario ni remitente**
 
 - **Evidencia:** functions/src/waves.ts:49-71 (lecturas y escritura fuera de transacción), :51-56 (solo bloquea si hay uno 'pending'), :27-30 (toUid solo valida largo), :73-81 (id aleatorio)
 - **Detalle:** N llamadas concurrentes leen sentToday=19 y todas escriben, así que se supera el límite de 20 y se crean saludos pendientes duplicados. Tras un 'ignored' se puede volver a saludar de inmediato: un usuario Plus (ilimitado) puede acosar a la misma persona sin fin. Se puede saludar a cualquier uid filtrado (sin verificar que exista, sea adulto, esté visible o dentro del radio del plan), y el remitente no necesita ser adulto ni tener perfil.
 - **Recomendación:** ID determinístico `${from}_${to}` o contador `waveCounters/{uid}_{yyyymmdd}` en transacción. Cooldown por par tras 'ignored' (p. ej. 14 días, también para Plus) y tope de N saludos por par al mes. Validar destinatario (existe, adulto, visible o con saludo previo, dentro del radio) y remitente (adulto, perfil completo, sin baneo). Test de carrera: 25 llamadas concurrentes resultan en exactamente 20 aceptadas.
 
-### BE-15 · P1 · compliance · sin verificar
+### BE-15 · P1 · compliance · 🟡 parcial
 **deleteAccount: cascada incompleta, síncrona y sin protección de sesión**
 
 - **Evidencia:** functions/src/deleteAccount.ts:42-54 (borra waves `from` pero no `to`; no toca chats ni reports), :18-32 (anonimiza mensajes pero deja chat.lastMessage, lastMessageSenderId y unreadCount con el uid), :56-60 (traga errores de Storage), :62-67 (sin revokeRefreshTokens), sin chequeo de auth_time; timeout por defecto
 - **Detalle:** Quedan saludos recibidos con el uid, el preview de 140 caracteres del último mensaje, el chat en 'active' (el otro sigue escribiendo al vacío), los reportes, el cliente en RevenueCat y la suscripción de la tienda cobrando sin aviso. Con el ID token vigente hasta 1 h, el cliente puede recrear users, profiles y locations (documentos zombie sin Auth). Una cuenta con mucho historial puede exceder el timeout y quedar a medias. Una sesión robada borra la cuenta sin re-autenticación. Respuesta `purgeWithinDays: 30` sin política de backups/PITR documentada.
 - **Recomendación:** Trabajo durable: `deletionRequests/{uid}` + trigger con reintentos (o Cloud Tasks), BulkWriter y recursiveDelete. Cubrir waves from/to, chats (status 'closed', lastMessage anonimizado), mensajes, reports según la política de retención, Storage (falla si no se puede borrar), entitlements, DELETE del subscriber en RevenueCat, docs de rate limit y consentimientos con retención legal mínima. revokeRefreshTokens antes de borrar. Exigir auth_time ≤5 min. Avisar si Plus está activo, con link a gestionar la suscripción. Test en el emulador: después de la cascada, un barrido de todas las colecciones encuentra 0 documentos con el uid salvo la evidencia legal declarada.
+- **Verificación (partial):** La cascada de deleteAccount es incompleta (waves 'to', chats con lastMessage/lastMessageSenderId/status 'active', reports, Storage con error tragado), síncrona y sin re-autenticación (auth_time). El riesgo zombie es real: con el ID token vigente (≤1 h) el cliente puede recrear users y profiles por reglas, y locations vía updateLocation. Pero revokeRefreshTokens no lo mitiga, porque Firestore Rules y onCall no chequean revocación. Hace falta un tombstone (p. ej. `deletedUsers/{uid}` consultado en reglas y en requireUid) o verifyIdToken con checkRevoked en los callables, más un barrido diferido.
 
-### BE-16 · P1 · compliance · sin verificar
+### BE-16 · P1 · compliance · ✅ confirmado
 **exportMyData incompleto, síncrono y sin rate limit**
 
 - **Evidencia:** functions/src/exportMyData.ts:10-19 (sin Auth record, consents, reports propios, metadatos de chats ni archivos de Storage), :21-29 (todos los mensajes leídos en línea), :31-41 (Timestamps de Firestore serializados como objetos internos)
 - **Detalle:** La portabilidad y el acceso de la Ley 21.719 exigen un export completo y legible. Faltan datos de Auth (proveedores, email, fechas), consentimientos, reportes enviados, participantes de los chats, foto de perfil y compras. Con mucho historial la respuesta del callable puede exceder los límites y el timeout. Sin límite, cada llamada relee todo, lo que da un vector de costo.
 - **Recomendación:** Job asíncrono que genera un JSON (ISO-8601) en `exports/{uid}/{ts}.json` con URL firmada de 72 h; máximo 1 cada 24 h. Incluir Auth, users, profiles, consentEvents, celda de ubicación, waves, blocks, reports enviados, metadatos de chats y mensajes propios, entitlements y archivos de Storage. Test de esquema contra un fixture.
 
-### BE-17 · P1 · gap · sin verificar
+### BE-17 · P1 · gap · ✅ confirmado
 **Push: sin registro de tokens en el cliente, sin limpiar tokens inválidos y sin respetar mute; trigger no idempotente**
 
 - **Evidencia:** functions/src/onMessageCreated.ts:54-71 (ignora `result.responses`), :41-50 (increment de unreadCount sin deduplicar por event.id); pubspec.yaml sin firebase_messaging (nadie escribe fcmTokens); `muted` existe en reglas (firestore.rules:113-116) pero el trigger no lo consulta
 - **Detalle:** Hoy no llega ninguna notificación, porque nadie registra tokens. Cuando se registren, los tokens `registration-token-not-registered` se acumulan para siempre, los chats silenciados siguen notificando y una reentrega del evento (at-least-once) duplica el contador de no leídos. El contenido del push sí está bien protegido. Sin push, la retención y la tasa de respuesta (North Star) caen.
 - **Recomendación:** Cliente con firebase_messaging guardando en `users/{uid}/fcmTokens/{token}` con updatedAt. El trigger borra los tokens que fallan con not-registered o invalid-argument, respeta `muted[uid]` y las preferencias, y deduplica con `processedEvents/{event.id}`. Tests con messaging mockeado.
 
-### BE-18 · P1 · security · sin verificar
+### BE-18 · P1 · security · ✅ confirmado
 **Reportes sin target ni validación de claves, sin cola de moderación ni mecanismo de baneo**
 
 - **Evidencia:** firestore.rules:180-187 (exige reporterId, reason y text; no exige reportedUid, no tiene keys().hasOnly ni createdAt==request.time). Verificado: report sin target y con 400 KB de basura → ALLOW. No existe flag ni claim `banned` en reglas ni en functions; docs/security/threat-model.md:20 ('un humano tiene que leerlos en consola')
 - **Detalle:** Se pueden crear reportes inútiles o inflar el storage, y no hay dedupe ni límite (reportes como arma). Lo central: aunque se lean los reportes, no existe ninguna forma de actuar. No se puede suspender a un usuario de modo que reglas y callables lo respeten, y Apple 1.2 exige actuar sobre contenido o usuarios reportados (la app promete 'lo revisamos en menos de 24 h').
 - **Recomendación:** Callable `reportUser` (o reglas estrictas) con reportedUid obligatorio, contexto (chatId/messageId), dedupe por par y día, rate limit y opción de bloqueo en el mismo paso. Cola `moderationQueue` priorizada (minor/harassment). Custom claim `banned` revisado en reglas (`request.auth.token.banned != true`) y en `requireUid`. Script o consola admin mínima y SLA documentado. Tests.
 
-### BE-19 · P1 · security · sin verificar
+### BE-19 · P1 · security · ✅ confirmado
 **Fotos: photoUrl acepta cualquier URL externa; Storage permite SVG, acumulación ilimitada, sin borrado ni limpieza de EXIF**
 
 - **Evidencia:** firestore.rules:63-65 (photoUrl es cualquier string ≤500; verificado: 'https://evil.example/pixel.gif' → ALLOW); storage.rules:5-10 (`image/.*` incluye svg+xml, cualquier fileName sin límite de cantidad, `write` con request.resource no permite delete, lectura para cualquier sesión)
 - **Detalle:** Un perfil con photoUrl a un servidor propio funciona como píxel de rastreo: registra la IP y el horario de cada persona que lo mira en Cerca o en el chat, y salta cualquier moderación de imágenes. Al habilitar la subida (D9), las fotos de teléfono traen EXIF con GPS (coordenadas exactas legibles por cualquier sesión) y los archivos se acumulan sin límite (costo).
 - **Recomendación:** photoUrl lo escribe solo el servidor, o las reglas exigen el patrón del bucket propio `avatars/{uid}/avatar.jpg`. Storage: allowlist image/jpeg, png y webp, nombre fijo (sobrescribe), delete del dueño permitido. Trigger onObjectFinalized que re-encode a WebP o JPEG sin metadatos (elimina EXIF y GPS), redimensione y opcionalmente pase por SafeSearch. Tests de storage rules en el emulador.
 
-### BE-20 · P1 · process · sin verificar
+### BE-20 · P1 · process · ✅ confirmado
 **Cobertura de tests insuficiente: 11 tests de reglas, 0 de Storage, 0 de integración de Functions**
 
 - **Evidencia:** firestore-tests/rules.test.ts (11 tests; pasan 11/11 en el emulador v1.22.0, verificado); functions/src/pure.test.ts (10 tests puros); docs/BASELINE.md:44 ('No se corrieron en esta máquina')
 - **Detalle:** La §11.1 pedía allow/deny por colección y tests de Functions en el emulador (cupo, filtros de getNearby, cascada de deleteAccount, idempotencia del webhook). Faltan casos de get/list/update/delete por colección, de waves, blocks y reports, y de payloads del cliente. Por eso pasaron BE-03, BE-10, BE-11, BE-18 y BE-19: de 20 sondas adversariales que ejecuté, 8 permiten escrituras que deberían negarse y 2 niegan escrituras legítimas del cliente.
 - **Recomendación:** Matriz de reglas con ≥60 casos (colección × get/list/create/update/delete × dueño/extraño/bloqueado/no autenticado), incluidas las 20 sondas de esta auditoría. Tests de storage.rules. Integración de Functions con `firebase emulators:exec` (auth+firestore+functions) para los 9 callables y los 2 triggers. Publicar el reporte de cobertura de reglas del emulador como artefacto de CI.
 
-### BE-21 · P1 · security · sin verificar
+### BE-21 · P1 · security · 🟡 parcial
 **Rate limiting solo en 1 de 9 callables; App Check sin protección contra replay**
 
 - **Evidencia:** pure/rateLimit.ts (solo updateLocation); getNearby, touchActivity, blockUser, exportMyData, sendWave (Plus ilimitado), respondWave y deleteAccount sin límite; functions/src/https.ts:5-8 sin consumeAppCheckToken; index.ts:4 maxInstances 20 global
 - **Detalle:** Un token de App Check extraído de un dispositivo real se reutiliza durante todo su TTL. Con una sesión se puede martillar getNearby (costo de ~6k lecturas por llamada) o exportMyData. `maxInstances: 20` global hace que un abusador sature la capacidad de todos los callables, incluido el trigger de mensajes.
 - **Recomendación:** Rate limiter genérico persistente (token bucket transaccional en `rateLimits/{uid}_{acción}` con TTL) aplicado a todos los callables y a los reportes, con presupuestos por acción documentados. consumeAppCheckToken en acciones sensibles. maxInstances, concurrency, memory y timeoutSeconds por función. Tests: la llamada N+1 dentro de la ventana devuelve resource-exhausted.
+- **Verificación (partial):** Solo updateLocation tiene rate limit (20 s). getNearby (~6,4k lecturas en el peor caso), touchActivity, blockUser, exportMyData, respondWave, deleteAccount y sendWave para Plus no tienen límite persistente por uid, y no se usa consumeAppCheckToken en acciones sensibles. maxInstances:20 aplica por función: un abusador puede agotar la capacidad de getNearby (20 instancias × concurrencia) y degradar Cerca para todos, más el costo de lecturas. No satura los demás callables ni el trigger onMessageCreated, que tienen su propio tope.
 
 ### BE-22 · P2 · scalability
 **Índices y TTL: faltan compuestos y políticas TTL, y hay riesgo de hotspot en locations.updatedAt**
@@ -598,159 +604,164 @@ TABLA: S1 parcial · S2 parcial · S3 hecho · S4 parcial · S5 parcial · S6 pa
 
 **Hallazgos**
 
-### CV-01 · P0 · false_claim · sin verificar
+### CV-01 · P0 · false_claim · ✅ confirmado
 **updateLocation siempre falla (lectura después de escritura en la transacción): S1/B5 'hecho' es falso en runtime**
 
 - **Evidencia:** functions/src/updateLocation.ts:34 tx.set(locRef) y :38 tx.get(userRef); functions/node_modules/@google-cloud/firestore/build/src/transaction.js:96-98 lanza 'Firestore transactions require all reads to be executed before all writes.'; lib/providers/location_provider.dart:187-203 traga el error; functions/src/getNearby.ts:43-46
 - **Detalle:** Toda llamada lanza dentro de runTransaction, así que la callable devuelve INTERNAL y locations/{uid} nunca se escribe. Entonces getNearby responde 'Location is not set.' a todos y Cerca en producción muestra siempre 'No pudimos cargar…'. El cliente silencia el error. Los tests puros no cubren el handler y los de emulador no se corrieron.
 - **Recomendación:** Hacer todas las lecturas antes de escribir (tx.getAll(locRef, userRef) al inicio). Agregar un test de integración en el emulador (Functions+Firestore) que llame updateLocation dos veces y verifique geohash y luego resource-exhausted, y correrlo en CI.
 
-### CV-02 · P0 · false_claim · sin verificar
+### CV-02 · P0 · false_claim · ✅ confirmado
 **La fecha de nacimiento nunca llega al servidor: getNearby oculta a todos y el 18+ queda solo en el cliente**
 
 - **Evidencia:** lib/screens/onboarding/onboarding_screen.dart:53-70 (solo guarda keyBirthDate en prefs locales; grep sin escrituras de birthDate en lib/services); functions/src/getNearby.ts:118; functions/src/pure/nearbyFilter.ts:40; docs/BASELINE.md:55 'S6 Confirmado'
 - **Detalle:** Ningún usuario real tiene users/{uid}.birthDate, así que filterNearbyPeople descarta al 100% y Cerca queda vacía aunque se arregle CV-01. El gate de edad se evade borrando las prefs o reinstalando, y el consentimiento de términos y analytics no queda registrado ni versionado (S12).
 - **Recomendación:** Crear una callable completeOnboarding({birthDate, consents{terms{version}, analytics{version,granted}}}) que valide 18+ en el servidor y escriba users.birthDate y consents con serverTimestamp; no permitir updateLocation/getNearby sin onboarding completo. Tests de emulador: usuario sin birthDate excluido, adulto incluido, menor rechazado.
 
-### CV-03 · P0 · false_claim · sin verificar
+### CV-03 · P0 · false_claim · ✅ confirmado
 **S7 Saludo a medias: nadie puede recibir ni aceptar un saludo y en producción no se puede crear ningún chat nuevo**
 
 - **Evidencia:** lib/services/safety_service_live.dart:20-33 define respondWave sin llamadores (grep 'respondWave|incomingPending' solo encuentra la definición); no existe listener de waves to==uid ni la fila 'Saludos nuevos'; firestore.rules:155 chats create:false; lib/services/chat_service_live.dart:22-39; README.md:16 'Saludo… ✅'; docs/BASELINE.md:57; functions/src/waves.ts:130-136 crea el chat sin lastMessageAt mientras chat_service_live.dart:46 ordena por ese campo
 - **Detalle:** El loop de §7.2 está roto: A saluda y la wave queda pending, pero B nunca se entera (sin UI, sin push, sin trigger). respondWave nunca corre, el chat nunca existe y los mensajes son imposibles. Con WAVES_ENABLED=false, getOrCreateChat también es denegado por reglas. Además, el chat aceptado no aparecería en la lista porque le falta lastMessageAt. En el demo la aceptación tampoco existe (MemoryWaves).
 - **Recomendación:** Crear WavesRepository (Demo/Firebase) con stream de saludos entrantes, una fila 'Saludos nuevos (n)' con Aceptar/Ignorar que llame a respondWave y navegue a /chat/:id, y un trigger onWaveCreated con push sin contenido. Setear lastMessageAt al crear el chat. Test E2E en emulador: A saluda → B acepta → ambos ven el chat y se envían un mensaje.
 
-### CV-04 · P0 · false_claim · sin verificar
+### CV-04 · P0 · false_claim · ✅ confirmado
 **Las reglas de profiles rechazan todas las escrituras del cliente (editar perfil, visibilidad, login con foto)**
 
 - **Evidencia:** lib/services/user_service_live.dart:83-91 agrega 'updatedAt' y :44 'age'; firestore.rules:69-71 (profileClientKeys sin updatedAt ni age) y :136-138 (affectedKeys().hasOnly); lib/services/user_service.dart:142-143 setVisibility→updateProfile; lib/services/auth_service_live.dart:325-333 llama updateProfile en el login; web/privacidad.html:71 promete 'Puedes dejar de aparecer en Cerca desde tu perfil'; firestore-tests/rules.test.ts no prueba el update de profiles
 - **Detalle:** Todo updateProfile devuelve PERMISSION_DENIED: no se puede editar nombre, bio ni intereses, ni apagar 'Visible en Cerca', que es un control de privacidad prometido en la política. El login con Google de un perfil sin foto falla porque _upsertProfile lanza. createUser con age≠null también es rechazado.
 - **Recomendación:** Definir un contrato de payload con fixtures JSON compartidos entre Dart y TS, y alinear: quitar updatedAt/age o permitirlos con validación (updatedAt == request.time). Tests de reglas con el payload exacto del cliente (create/update de profiles y users, markChatAsRead) y un test del toggle de visibilidad contra el emulador.
 
-### CV-05 · P0 · false_claim · sin verificar
+### CV-05 · P0 · false_claim · 🟡 parcial
 **B4 sigue sin resolver: 'activa ahora' para siempre, y los usuarios activos desaparecen de Cerca o nunca aparecen**
 
 - **Evidencia:** functions/src/touchActivity.ts:10-17 escribe profiles.activityBucket='ahora' fijo; solo se invoca en el login con perfil existente (lib/services/auth_service_live.dart:325) y en el logout (lib/services/auth_service.dart:232); no hay observer de ciclo de vida (grep AppLifecycle vacío); lib/screens/chat/chat_screen.dart:253-254 y lib/widgets/public_profile_sheet.dart:31-32 muestran ese bucket; functions/src/pure/nearbyFilter.ts:42-44; docs/BASELINE.md:65
 - **Detalle:** El chat y la ficha muestran 'activa ahora' indefinidamente, incluso después de cerrar sesión, que vuelve a escribir 'ahora'. Como las sesiones de Firebase persisten, lastActiveAt no se renueva y a los 7 días un usuario activo sale de Cerca. Los usuarios nuevos (vía createUser) nunca reciben lastActiveAt, así que nunca aparecen.
 - **Recomendación:** Llamar touchActivity al volver a primer plano (throttle ≥5 min) y al crear la cuenta, y quitarla del logout. No persistir un bucket estático: derivarlo de lastActiveAt al leer. Tests de decaimiento del bucket y de un usuario nuevo visible en Cerca (emulador).
+- **Verificación (partial):** B4 sigue abierto. El bucket 'ahora' es estático en profiles y se muestra indefinidamente en el chat y en la ficha; el logout lo reescribe. No hay touch al volver a primer plano: con la sesión persistida, lastActiveAt no se renueva y a los 7 días el usuario sale de Cerca. Un usuario nuevo no recibe lastActiveAt al registrarse, así que no aparece en Cerca hasta su primer logout o re-login (no 'nunca'). En producción, además, touchActivity fallaría por App Check (CV-07).
 
-### CV-06 · P0 · gap · sin verificar
+### CV-06 · P0 · gap · 🟡 parcial
 **Functions no se puede desplegar y la BASELINE omitió el build**
 
 - **Evidencia:** functions/src/pure.test.ts:23 'const require = createRequire(...)' → TS2441 en 'npm run build' (verificado por el orquestador); functions/tsconfig.json incluye src/**/*.ts (compila los tests a lib/); firebase.json:9-21 sin predeploy; functions/.gitignore ignora lib/; functions/package.json:5-7 engines node '20' (EOL 2026-04-30); .github/workflows/ci.yml sin job de functions; docs/BASELINE.md:36-44 solo reporta npm test; DEPLOY.md:38
 - **Detalle:** En un clon limpio no existe lib/index.js y el build falla, así que el 'firebase deploy --only …functions' de DEPLOY.md no puede funcionar. El runtime Node 20 está fuera de soporte. El §12 pedía pegar la salida real de lint, test y emulador; no se corrió ni el build ni el emulador.
 - **Recomendación:** Usar un tsconfig.build.json sin tests (o renombrar la variable), agregar predeploy 'npm --prefix functions run build' y engines node 22. Agregar jobs de CI 'functions' (npm ci, lint, build, test) y 'rules' (firebase emulators:exec … firestore-tests). El DoD exige pegar la salida del build.
+- **Verificación (partial):** En un clon limpio, seguir DEPLOY.md:38 falla porque no existe lib/index.js ni hay predeploy, y si se agrega un predeploy de build, el deploy aborta por el exit 2 (TS2441). Aun así, tsc emite lib/ pese al error: un deploy manual que ignore el exit code es posible, así que no es literalmente 'indesplegable'. Node 20 tiene EOL upstream el 2026-04-30; no verifiqué la fecha de deprecación del runtime en GCF. CI sin job de functions. Se omitieron lint y emulador del §12. El build no es parte del DoD del §12, así que la frase 'El DoD exige pegar la salida del build' es incorrecta: debe ser una recomendación nueva.
 
-### CV-07 · P0 · false_claim · sin verificar
+### CV-07 · P0 · false_claim · ✅ confirmado
 **App Check se exige en el servidor pero no existe en el cliente; el ADR 0003 dice que basta registrar las apps**
 
 - **Evidencia:** functions/src/https.ts:5-8 enforceAppCheck:true; pubspec.yaml:21-27 sin firebase_app_check (grep vacío en lib/); docs/adr/0003-app-check-fail-closed.md ('…hasta registrar las apps en App Check')
 - **Detalle:** Sin el SDK cliente no se adjunta token, así que getNearby, updateLocation, sendWave, blockUser, deleteAccount, exportMyData y touchActivity fallan aunque se configure la consola. Esto incluye borrar la cuenta y bloquear, que exigen las tiendas.
 - **Recomendación:** Agregar firebase_app_check (Play Integrity, App Attest/DeviceCheck y reCAPTCHA Enterprise en web) activado en firebase_boot antes de la primera callable, con debug provider para emulador y CI. Corregir el ADR 0003. Test de integración de una callable con debug token.
 
-### CV-08 · P1 · process · sin verificar
+### CV-08 · P1 · process · 🟡 parcial
 **§13 y §9 incumplidos: un commit monolítico, Fase 1 en adelante sin aprobación y sin revisión de A12 ni A7/A8**
 
 - **Evidencia:** git log 02abbd4..155b6f6 = 1 commit; git diff --shortstat sin lockfiles ni fuentes: 124 archivos, +4.824/−640 (el tope del §9 es ≤~400 líneas por PR); docs/PLAN.md:3 'La orden de esta sesión fue ejecutar sin detenerse' (sin cita ni fecha de aprobación humana; el §15 ordenaba no empezar la Fase 1); no hay screenshots antes/después, goldens, reportes del §14 ni comentarios de red team
 - **Detalle:** No se puede revisar, revertir ni bisecar por ítem. Los P0 CV-01..07 pasaron porque nadie ejecutó el flujo real; A12 debía intentar scrapear, escribir tras un bloqueo y saltarse el paywall. El conventional commit está bien, pero es uno solo y describe mal el contenido ('Keep exact coordinates', cuando guarda una celda difuminada).
 - **Recomendación:** En v2: una serie de PRs (uno por hallazgo) con plantilla de evidencia, riesgos y checklist de red team, más CI verde. Gate humano explícito registrado en docs/PLAN.md (cita + fecha) antes de salir de la Fase 0. Si el entorno no puede pedir aprobación, detenerse y entregar el plan.
+- **Verificación (partial):** Confirmado: un solo commit monolítico de ~4,8k líneas (el §9 limita a ≤~400 por PR), sin screenshots antes/después, goldens, reportes del §14 ni revisión de A12/A7/A8, y un mensaje de commit que describe mal el contenido (no se guardan coordenadas exactas). No verificable: que no hubiera aprobación humana. PLAN.md:3 reconoce la desviación y la atribuye a una orden de la sesión. Lo objetable es que no hay cita ni fecha de esa orden, no que esté probado que se saltó el gate.
 
-### CV-09 · P1 · false_claim · sin verificar
+### CV-09 · P1 · false_claim · ✅ confirmado
 **Fase 2 'Design system: Hecho' es falso: 0 de 21 componentes y el ThemeExtension no se consume**
 
 - **Evidencia:** lib/core/design_system/ solo tiene tokens/* y components/pf_mark.dart; grep 'context.pf' fuera del DS = 0; grep 'AppColors\.|isDark \?' en lib/screens + lib/widgets = 295; AppShadows 14 referencias, boxShadow 17 (p.ej. lib/widgets/chat_bubble.dart:76-84); docs/PLAN.md:11
 - **Detalle:** El §5.3 prohíbe que los widgets lean AppColors o usen isDark ?, y el §5.4 pide 21 componentes Pf* con estados, Semantics, test y golden. No existen, como tampoco la galería /_dev/gallery, el isotipo SVG (PfMark es un CustomPaint, ADR 0006) ni la splash nativa única (D7).
 - **Recomendación:** Gate de CI: 0 ocurrencias de 'AppColors\.|isDark \?|AppShadows|TextStyle\(' fuera de lib/core/design_system. Implementar los 21 componentes con test y golden (light/dark × 1.0/1.3) y la galería dev, y reportar el avance en STATUS.md.
 
-### CV-10 · P1 · false_claim · sin verificar
+### CV-10 · P1 · false_claim · 🟡 parcial
 **D5: el gate de literales se cumplió borrando fontSize, no tokenizando**
 
 - **Evidencia:** git diff 02abbd4 HEAD -- lib/screens lib/widgets: ~29 líneas '-fontSize: …' borradas sin reemplazo (p.ej. lib/screens/nearby/nearby_screen.dart en _Header y _ToggleSegment, que quedan con TextStyle sin tamaño); tool/gates.sh:7 solo busca 'fontSize:'
 - **Detalle:** Los textos caen al tamaño por defecto y cambia la jerarquía (títulos de 26/22 → default) sin screenshots ni goldens. El gate pasa (exit 0) pero no cumple la intención del §5.1.10.
 - **Recomendación:** Usar estilos PfType (titleLg, label, caption…), con un gate que prohíba TextStyle( fuera del DS, y goldens antes/después de Cerca, chat y login.
+- **Verificación (partial):** El gate se cumplió quitando fontSize sin mapear a roles PfType equivalentes. En ~18 casos (copyWith sobre textTheme) el texto toma el tamaño del rol del tema, que sí es un token, pero se pierde la jerarquía de diseño: el título de Cerca pasa de 26/22 a 20 sin distinción wide/narrow. En ~9 casos de TextStyle( directo, el texto hereda DefaultTextStyle (bodyMedium 15), por ejemplo las etiquetas del toggle de 12,5 a 15. Hay cambios de jerarquía sin goldens ni screenshots. No es 'tamaño por defecto' en todos los casos.
 
-### CV-11 · P1 · gap · sin verificar
+### CV-11 · P1 · gap · ✅ confirmado
 **Onboarding: 'Siguiente' en el paso 2 intenta terminar y se queda bloqueado; falta el paso de privacidad y los links legales**
 
 - **Evidencia:** lib/screens/onboarding/onboarding_screen.dart:30 (_stepCount=3), :32-50 (_pages tiene 2 elementos) y :81-83 (if (_page < _pages.length - 1) … else _finish()); lib/screens/onboarding/age_consent_form.dart:77-79 (título plano, sin url_launcher)
 - **Detalle:** En la página 1 el CTA primario llama a _finish() con birthDate null: muestra el toast 'Picaflor es para mayores de 18.' y no avanza; solo se llega a la edad deslizando o con 'Saltar'. Falta el paso 'Tu zona, nunca tu punto exacto' y los Términos y la Política no abren. El copy 'Abre un chat' contradice S7.
 - **Recomendación:** Cambiar la condición a _stepCount - 1. Widget test que recorra los 3 pasos solo con el CTA. Links tappables a TERMS_URL y PRIVACY_POLICY_URL, y copy alineado al saludo.
 
-### CV-12 · P1 · gap · sin verificar
+### CV-12 · P1 · gap · ✅ confirmado
 **S12/S5 parciales: sin registro de consentimiento, export no portable, y el borrado deja datos personales**
 
 - **Evidencia:** onboarding_screen.dart:63-69 (consentimiento solo en prefs); lib/screens/settings/settings_screen.dart:410-433 (export = data.toString() en un AlertDialog) y :476-479 (borrado sin try/catch); functions/src/deleteAccount.ts:40-54 (no toca chats.lastMessage/lastMessageSenderId, waves to==uid, reports ni bloqueos de terceros); functions/src/onMessageCreated.ts:41-45 copia el texto a chats.lastMessage; web/privacidad.html:77-87 no declara la transferencia a Brasil; docs/adr/0005 afirma sin evidencia que southamerica-west1 no sirve (supuesto a verificar)
 - **Detalle:** La Ley 21.719 (vigencia plena el 2026-12-01, en 55 días) exige consentimiento demostrable, portabilidad estructurada y supresión efectiva. Después de borrar la cuenta, el último mensaje del usuario sigue legible en chats/{id}.lastMessage. No hay retención ejecutable (ni TTL ni job). Si la callable falla, el usuario no recibe feedback.
 - **Recomendación:** Consentimientos versionados en users mediante una callable. Export como archivo JSON descargable o compartible. deleteAccount que anonimice chat.lastMessage y borre waves to==uid. TTL o purga programada documentada. Verificar región Santiago con enlace oficial en el ADR o declarar la transferencia. Test de emulador 'sin PII residual tras deleteAccount'.
 
-### CV-13 · P1 · false_claim · sin verificar
+### CV-13 · P1 · false_claim · ✅ confirmado
 **S4: bloqueo y reporte incompletos, y la BASELINE afirma un bloqueo en Cerca que no existe**
 
 - **Evidencia:** lib/features/safety/safety_controller.dart:8-23 (bloqueos solo en memoria) y :29 (alsoBlock=true por defecto); lib/models/chat_model.dart sin campo status; grep 'bloquead' sin 'Usuarios bloqueados' en Ajustes; lib/widgets/public_profile_sheet.dart:140-162 (sin texto libre ni opción 'Además, bloquear'); docs/BASELINE.md:54 dice 'bloqueo en la lista de Cerca' pero lib/screens/nearby/nearby_screen.dart no tiene esa acción (está en chat_list_screen.dart:297-316)
 - **Detalle:** Tras reiniciar la app, la ficha de alguien bloqueado vuelve a ofrecer 'Saludar'. El chat bloqueado deja escribir y falla con un error genérico. No se puede desbloquear. Los errores de la callable no se manejan. Tampoco hay cola de moderación (esto sí está admitido).
 - **Recomendación:** BlocksRepository con stream, lista y desbloqueo en Ajustes (callable unblockUser). ChatModel.status y UI de chat bloqueado. PfReportSheet con motivo, texto y checkbox desmarcable 'Además, bloquear'. Trigger onReportCreated → cola o alerta. Widget tests.
 
-### CV-14 · P1 · gap · sin verificar
+### CV-14 · P1 · gap · ✅ confirmado
 **B5 y escalabilidad: getNearby caro y con pérdida en zonas densas, más N+1 secuencial en el cliente**
 
 - **Evidencia:** functions/src/getNearby.ts:13 y :54-61 (9 prefijos × limit 150, sin orden por recencia), :80-87 (getAll de profiles + users + blocks por candidato y hasta 1.000 waves); lib/services/user_service_live.dart:127-158 (await getUser secuencial, hasta 50); functions/src/index.ts:4 maxInstances 20; sin rate limit en getNearby
 - **Detalle:** Peor caso ≈6.400 lecturas por refresh, más hasta 50 lecturas secuenciales del cliente (cada una evalúa 2 exists() en reglas) contra un timeout de 8 s. En zonas densas, con más de 150 personas por celda p5, se descartan personas de forma arbitraria (orden lexicográfico). El costo crece lineal con DAU × refresh.
 - **Recomendación:** Índice denormalizado nearbyIndex/{uid} (geohash, isVisible, adulto, lastActiveAt y tarjeta pública) mantenido por triggers. Consulta por celdas ordenada por recencia, con presupuesto ≤500 lecturas por llamada y la tarjeta incluida en la respuesta (sin N+1). Rate limit por uid. Benchmark en emulador con 50k usuarios sintéticos en Santiago reportando lecturas por llamada y p95.
 
-### CV-15 · P1 · gap · sin verificar
+### CV-15 · P1 · gap · ✅ confirmado
 **Ubicación falsificable y Cerca sin límite: se puede mapear la base a ~150 m (S1 residual)**
 
 - **Evidencia:** functions/src/pure/grid.ts:13-27 acepta cualquier lat/lon del planeta; functions/src/updateLocation.ts:31 solo limita a 1 actualización cada 20 s; getNearby.ts sin rate limit; functions/src/pure/distance.ts:23 (very_close <150 m); docs/security/threat-model.md no lo trata
 - **Detalle:** Con una sesión y una app modificada (o App Check burlado), un script recorre la grilla cada 20 s y llama getNearby sin límite. Con los cambios de bucket triangula la celda de ~150 m de cada usuario visible de la ciudad.
 - **Recomendación:** Validar plausibilidad (bounding box del Gran Santiago y velocidad máxima entre actualizaciones), poner rate limit a getNearby (p.ej. 10/min y 200/día), subir el bucket mínimo a ≥300 m y alertar ante patrones de barrido. Documentarlo como caso de A12.
 
-### CV-16 · P1 · gap · sin verificar
+### CV-16 · P1 · gap · ✅ confirmado
 **El guard anti-demo (S8) está inerte y la lógica demo_ sigue en producción (B7)**
 
 - **Evidencia:** lib/core/privacy/nearby_policy.dart:55-67 solo dispara con flavor=='prod'; lib/core/config/app_config.dart:14-17 y :47-50 (DEMO_MODE true y FLAVOR 'dev' por defecto); grep FLAVOR en DEPLOY.md, README y CI = 0; lib/services/chat_service.dart:43-47, :154-158, :177-179; lib/services/user_service_live.dart:130
 - **Detalle:** Un build de tienda que olvide DEMO_MODE=false y no pase FLAVOR=prod (no documentado) arranca con perfiles inventados y el guard no actúa. Sin repositorios no se puede verificar que ningún provider resuelva a Demo*.
 - **Recomendación:** Flavors reales (env/{dev,staging,prod}.json con --dart-define-from-file) documentados. Guard con AppConfig.isRelease && !kIsWeb && demoMode → fallo. Test que construya el ProviderContainer de prod y verifique que ningún override es Demo*. Eliminar las ramas demo_ de los servicios live.
 
-### CV-17 · P1 · false_claim · sin verificar
+### CV-17 · P1 · false_claim · ✅ confirmado
 **Fase 7 'Hecho' exagerada: la lista de espera es ficticia y no hay analítica instrumentada**
 
 - **Evidencia:** lib/screens/plus/plus_screen.dart:45-55 (snackbar 'Quedaste en la lista de espera' sin persistir nada) y :41 ('precios propuestos, no finales' en la UI); lib/core/analytics/app_analytics.dart (solo MemoryAnalytics; grep '.track(' en lib = 0); lib/core/config/app_config.dart:58-62 (plusEnabled en compile-time, no Remote Config); docs/PLAN.md:15
 - **Detalle:** El usuario recibe una confirmación falsa, con riesgo frente a la Ley 19.496. No se captura intención de compra ni la métrica de liquidez (≥60% de sesiones con ≥5 personas a ≤3 km), así que no hay forma de decidir cuándo ni en qué comuna encender Plus. Ninguno de los 18 eventos del §7.6 existe.
 - **Recomendación:** waitlist/{uid} (trigger, comuna aproximada, ts) vía callable. Analytics con consentimiento y los 18 eventos, con un test por cada emisión. Remote Config plus_enabled por cohorte o comuna. MonetizationRepository Demo/RevenueCat. Export a BigQuery con un tablero de liquidez por comuna.
 
-### CV-18 · P1 · gap · sin verificar
+### CV-18 · P1 · gap · ✅ confirmado
 **Webhook de RevenueCat frágil: el orden de eventos y los consumibles pueden quitar Plus**
 
 - **Evidencia:** functions/src/pure/revenuecat.ts:10-27 (todo evento sin 'plus' da plan 'free'; heurística product.includes('plus')); functions/src/revenuecatWebhook.ts:42-57 (merge sin comparar event_timestamp_ms)
 - **Detalle:** Supuesto plausible: una compra de boost_30m (NON_RENEWING_PURCHASE, sin entitlement plus) sobrescribe entitlements/{uid} a free con la suscripción activa. Los eventos fuera de orden pueden revertir una renovación. La idempotencia por id sí está bien.
 - **Recomendación:** Reconciliar contra la API REST de RevenueCat (GET subscriber) en cada evento. Consumibles en boosts/{uid}. Ignorar eventos con un timestamp anterior al último aplicado. Fixtures de test para INITIAL_PURCHASE, RENEWAL, CANCELLATION, EXPIRATION, NON_RENEWING_PURCHASE y TRANSFER.
 
-### CV-19 · P1 · gap · sin verificar
+### CV-19 · P1 · gap · ✅ confirmado
 **QA muy por debajo del §11: sin tests de regresión de la Fase 1, reglas sin ejecutar y CI incompleto**
 
 - **Evidencia:** 23 tests de Flutter (8 nuevos en test/v2_policy_test.dart:14-126; ninguno para B1, B2, B3, B7, S9 ni S10); firestore-tests/rules.test.ts con 11 casos nunca corridos (docs/BASELINE.md:44) y sin update de profiles/users ni markChatAsRead; .github/workflows/ci.yml sin dart format, functions, emulador ni umbral de cobertura, y Android con if:false; no hay goldens ni integration_test
 - **Detalle:** La Fase 1 exigía un test de regresión por PR. Un solo test de emulador con los payloads reales habría detectado CV-01, CV-02 y CV-04.
 - **Recomendación:** Por cada ítem, un test que falle en 02abbd4 y pase después. Jobs de CI de reglas y functions. Umbral de cobertura ≥80% en la lógica pura, que haga fallar el CI. Widget tests por estado e integration_test (Patrol) del loop completo.
 
-### CV-20 · P1 · gap · sin verificar
+### CV-20 · P1 · gap · ✅ confirmado
 **D1: regresión de contraste en dark en código nuevo**
 
 - **Evidencia:** lib/widgets/public_profile_sheet.dart:93-97 usa AppColors.lightTextSecondary (#4A5363) también en dark: 2,32:1 sobre #12171E (fórmula WCAG calculada); test/v2_policy_test.dart:98 solo prueba pares de tokens
 - **Detalle:** El mensaje de confianza 'Tu ubicación exacta nunca se comparte.' queda ilegible en dark. Los tests de tokens no detectan cómo se usan en los widgets.
 - **Recomendación:** Usar context.pf.colors.textSecondary. Widget tests con meetsGuideline(textContrastGuideline) en light y dark para cada pantalla y sheet.
 
-### CV-21 · P1 · process · sin verificar
+### CV-21 · P1 · process · ✅ confirmado
 **La BASELINE no es una línea base y mezcla 'confirmado' con 'arreglado'; los documentos se contradicen**
 
 - **Evidencia:** docs/BASELINE.md:11 ('después de los arreglos'), :26 (gates no corridos: 'no hay bash'), :46-82 (columna 'Confirmado' para ítems ya corregidos), :73 (D4 dice fuentes pendientes pero assets/fonts/Inter-*.ttf están commiteadas), :7 (expone la ruta local C:\Users\nicolas.andrade); docs/PLAN.md:9 ('salvo el build web') contra BASELINE.md:28-32; PLAN.md:19 ('Cerrar npm test') contra BASELINE.md:36-42 (10/10)
 - **Detalle:** La Fase 0 pedía correr el §12 sobre el estado base y tomar screenshots 'antes' (light/dark, 3 tamaños). No hay un estado previo medible (bundle web, cobertura, violaciones del gate) y las contradicciones restan credibilidad al resto.
 - **Recomendación:** Regenerar la BASELINE sobre un checkout limpio de 02abbd4, con las salidas completas (tamaño de main.dart.js, % de cobertura, conteo del gate) y la matriz de screenshots. STATUS.md con columnas 'verificación previa', 'estado' y 'evidencia (test/comando)'. Sin rutas personales.
 
-### CV-22 · P1 · gap · sin verificar
+### CV-22 · P1 · gap · 🟡 parcial
 **Fases 3, 4 y 8 sin ejecutar; A1, A3, A4, A6, D3 y D9 pendientes; las notificaciones push no funcionan**
 
 - **Evidencia:** if (_isDemo) en lib/services/user_service.dart:29-154 y chat_service.dart:35-193; re-exports de 4 líneas en lib/features/**/screens; time_ago.dart y date_utils.dart duplicados; StateNotifier en 6 archivos; sin lib/l10n/*.arb; pubspec.yaml sin firebase_messaging, crashlytics, remote_config, flutter_native_splash ni image_picker; login_screen.dart:492 'G' en texto; functions/src/onMessageCreated.ts:52-71 envía a fcmTokens que ningún cliente registra; docs/BASELINE.md:76-81 (admitido)
 - **Detalle:** La arquitectura del §8.1 (repositorios, flavors, Notifier) es prerrequisito para escalar el equipo y para los guards. Sin push no hay notificaciones de mensajes ni de saludos, lo que daña la retención D1/D7 y la liquidez.
 - **Recomendación:** Fase 3 por feature (nearby, waves, chat, safety, profile, plus) con interfaces y overrides. ARB con gate de strings. Push con permiso contextual y registro de token en users.fcmTokens. Foto de perfil con Storage y moderación. Botón oficial de Google.
+- **Verificación (partial):** Fases 3 y 4 apenas iniciadas, no 'sin ejecutar': hay ficha pública, pantalla Plus y ajustes nuevos, y se quitaron dependencias muertas (A5). La Fase 8 sí está sin ejecutar. A1, A3, A4, A6, D3 y D9 siguen pendientes, como admite la BASELINE. Push no funcional: el servidor envía a users.fcmTokens, pero ningún cliente registra tokens (sin firebase_messaging).
 
 ### CV-23 · P2 · gap
 **Reglas sin lista blanca de campos en messages, reports y blocks**
@@ -1785,5 +1796,222 @@ Veredicto de esta lente: Grok ejecutó el v1 como un solo agente que "actuaba" l
 
 ## PR · Production readiness: SRE, seguridad, QA y cumplimiento
 
-_Esta lente no devolvió resultado._
+**Veredicto de la lente**
+
+Veredicto: la rama de Grok NO se puede lanzar ni operar en producción. El código apunta en la dirección correcta: callables con App Check que fallan cerrado, reglas con deny por defecto, push sin contenido, logs sin PII y guard de firma. Pero el camino a producción está roto en 4 frentes verificados. (1) Build/CI/deploy: el CI de GitHub está rojo en la rama y en el PR #1 (Analyze falla con 5 warnings porque Flutter no está fijado: CI 3.47.6 contra 3.44.7 local), `tsc` falla, firebase.json no tiene predeploy y Node 20 se da de baja en Cloud Run functions el 2026-10-30, en 23 días. (2) Funcionalidad de producción: el cliente no trae el SDK de App Check, así que las 8 callables (Cerca, saludos, bloqueo, borrado, export) rechazan todo. Además, updateLocation siempre lanza por leer después de escribir en la transacción, y getNearby descarta a todos porque nadie escribe birthDate en Firestore. (3) Trust & Safety y tiendas: no hay términos ni estándares CSAE publicados, el sitio de hosting no existe (404) y no hay cola de moderación, aunque la app promete revisar en menos de 24 h. photoUrl acepta cualquier URL externa, lo que permite saltarse la moderación de imágenes y filtrar IPs de vecinos. (4) Ley 21.719 (vigente en 55 días): la política no cumple el deber de información, el consentimiento vive solo en el dispositivo, el export es un toString y no hay EIPD ni procedimiento de brechas. Tampoco hay observabilidad (ni Crashlytics, ni Performance, ni alertas o SLOs), CD por canales, proyectos separados, backups/TTL, OIDC, Dependabot, tests de emulador en CI, goldens ni Patrol. v2 debe exigir evidencia de CI verde (URL del run) y un E2E en emulador antes de declarar nada como hecho.
+
+**Lo que está bien y se preserva**
+
+- Callables con `enforceAppCheck: true` y región explícita (functions/src/https.ts:5-8); la decisión de fallar cerrado está documentada en un ADR (docs/adr/0003)
+- Webhook de RevenueCat que falla cerrado si falta el secreto, compara con `timingSafeEqual` y es idempotente vía `webhookEvents` en transacción (functions/src/pure/webhookAuth.ts, revenuecatWebhook.ts:42-57)
+- Push sin contenido del mensaje en la pantalla de bloqueo (functions/src/pure/push.ts) y logs `logger.info` sin uid, coordenadas ni texto
+- Reglas con catch-all deny (firestore.rules:198-200), `locations` cerrada, `entitlements`/`webhookEvents` solo servidor, `reports` solo creación, `participantIds` inmutable y mensajes solo en chat `active`; además hay 11 tests de reglas con @firebase/rules-unit-testing
+- El guard de Gradle impide firmar un release con la clave debug (android/app/build.gradle.kts:74-83); permisos reducidos a COARSE y WhenInUse (AndroidManifest.xml:3, Info.plist:11)
+- .gitignore cubre key.properties, google-services.json, GoogleService-Info.plist, service-account*.json, .env y *.p8
+- Borrado in-app con doble confirmación, página web /eliminar-cuenta, callable de export y moderación de nota y mensaje en servidor (base mínima para Apple 1.2 y 5.1.1(v))
+- Versiones exactas en functions/package.json y lockfiles commiteados (functions y firestore-tests)
+- Inter empaquetada con OFL y licencia embebida en los metadatos del TTF (verificado con strings)
+- ADRs que separan las decisiones humanas (región, precios, mapa de pago, App Check) y el gate anti-hardcode corriendo en CI (tool/gates.sh)
+
+**Hallazgos**
+
+### PR-01 · P0 · process
+**CI rojo en la rama y en el PR #1: Flutter sin fijar invalida la línea base**
+
+- **Evidencia:** gh run 37550737612 (push) y 37550773429 (pull_request), ambos failure en 'Analyze': 5 warnings unawaited_return_in_try_block en lib/services/auth_service_live.dart:49,76,107,161,261; CI usó Flutter 3.47.6 y docs/BASELINE.md dice 3.44.7 con 'No issues found'; .github/workflows/ci.yml:15-19 (channel: stable sin versión)
+- **Detalle:** La afirmación de BASELINE no es reproducible: el mismo commit falla en GitHub y Test/Build Web ni siquiera corren. Con `stable` flotante, cada release de Flutter puede romper main sin que haya cambiado el código. Las anotaciones del run también avisan que actions/checkout@v4 corre forzado sobre Node 24 y que ubuntu-latest migra a Ubuntu 26 desde el 2026-10-19.
+- **Recomendación:** Fijar la versión exacta de Flutter (flutter-version o flutter-version-file) y el runner (ubuntu-24.04), corregir los 5 warnings, exigir los checks como 'required' en main con branch protection y pegar en BASELINE.md la URL del run verde, no una salida local.
+
+### PR-02 · P0 · ops
+**Deploy de Functions imposible: build roto, sin predeploy y Node 20 dado de baja el 2026-10-30**
+
+- **Evidencia:** functions/package.json:5-7 (engines node "20"), :9 (build: tsc); functions/tsconfig.json:41 include src/**/*.ts incluye src/pure.test.ts (TS2441 en :23, verificado por el orquestador); firebase.json:9-21 sin 'predeploy' y lib/ en .gitignore; doc oficial de runtime: Node.js 20 Deprecation 2026-04-30, Decommission 2026-10-30 (https://docs.cloud.google.com/functions/1stgendocs/runtime-support)
+- **Detalle:** En un clone limpio no existe lib/index.js y la CLI no puede cargar el código. Si se agrega predeploy, `tsc` falla por el test. Aunque se arreglara, quedan 23 días: después del 30-10 no se pueden crear ni actualizar funciones en Node 20, ni siquiera para un hotfix de seguridad.
+- **Recomendación:** engines node 22 (o 24) y runtime explícito; tsconfig.build.json que excluya *.test.ts; en firebase.json, predeploy ["npm --prefix $RESOURCE_DIR run lint", "npm --prefix $RESOURCE_DIR run build"]; job de CI 'functions' con npm ci, lint, build y test. Verificable: el job está verde y existe lib/index.js como artefacto.
+
+### PR-03 · P0 · bug
+**Sin SDK de App Check en el cliente: las 8 callables (incluido deleteAccount) rechazan todo en producción**
+
+- **Evidencia:** pubspec.yaml:130-167 no declara firebase_app_check; `grep -rn AppCheck lib` sin resultados; functions/src/https.ts:7 enforceAppCheck:true usado por updateLocation, getNearby, sendWave, respondWave, blockUser, deleteAccount, exportMyData y touchActivity; lib/screens/settings/settings_screen.dart:477 llama deleteAccount sin try/catch
+- **Detalle:** ADR 0003 supone que basta con que un humano configure la consola, y eso es falso: sin `FirebaseAppCheck.instance.activate(...)` el cliente nunca envía el token. En producción Cerca, saludos, bloqueo, export y borrado de cuenta fallan siempre. Como el borrado in-app falla sin feedback (excepción no capturada), se incumplen Apple 5.1.1(v) y la política de borrado de Google Play, motivos de rechazo inmediato.
+- **Recomendación:** Agregar firebase_app_check y activarlo antes de la primera callable (Play Integrity, App Attest con fallback a DeviceCheck y reCAPTCHA Enterprise en web); debug provider solo en el flavor dev, con el token como secret; 7 días de métricas en modo monitor y luego enforcement en Functions, Firestore y Storage; manejo de errores con UI en borrado y export. Gate: test de integración en emulador que llama cada callable con y sin token.
+
+### PR-04 · P0 · bug
+**updateLocation siempre lanza: lectura después de escritura dentro de la transacción**
+
+- **Evidencia:** functions/src/updateLocation.ts:34-38 (tx.set(locRef) y luego await tx.get(userRef)); functions/node_modules/@google-cloud/firestore/build/src/transaction.js:96-97 lanza 'Firestore transactions require all reads to be executed before all writes.'
+- **Detalle:** Ningún usuario llega a tener `locations/{uid}`, así que getNearby responde siempre 'Location is not set' y Cerca queda muerta en producción. Los 10 tests puros no lo detectan porque no hay tests de Functions contra el emulador. Es la prueba de que el gate de la §12 v1 (emulators:exec) nunca se corrió.
+- **Recomendación:** Hacer todas las lecturas antes de las escrituras y agregar un test de integración en el emulador (updateLocation → getNearby desde otra cuenta → aparece el bucket esperado) que falle con el código actual. Exigir esta suite en CI.
+
+### PR-05 · P0 · bug
+**getNearby oculta a todos: birthDate nunca se escribe en Firestore**
+
+- **Evidencia:** functions/src/pure/nearbyFilter.ts:40 descarta a quien no tiene birthDate; lib/screens/onboarding/onboarding_screen.dart:63-69 la guarda solo en SharedPreferences; grep de 'birthDate' en lib/services y functions/src sin ningún writer
+- **Detalle:** Aunque se arregle PR-04, Cerca siempre devuelve vacío. Además el gate de edad es por dispositivo, no por cuenta: al entrar en otro dispositivo o borrar las preferencias no queda registro en el servidor. La regla también permite que el dueño cambie birthDate en cualquier momento (firestore.rules:124-126), lo que invalida el filtro 18+.
+- **Recomendación:** Una callable `completeOnboarding` que valide la edad en el servidor y escriba users.birthDate; reglas que hagan birthDate inmutable una vez fijado; test de reglas que niegue el cambio y E2E en emulador donde una persona adulta con onboarding aparece en Cerca y una sin él no aparece.
+
+### PR-06 · P0 · gap
+**Trust & Safety sin operación: reportes sin cola, SLA falso de 24 h y evidencia destruida**
+
+- **Evidencia:** lib/widgets/public_profile_sheet.dart:166 promete 'Lo revisamos en menos de 24 h.'; docs/PLAN.md:13 y docs/security/threat-model.md:20 admiten 'No hay cola de moderación'; lib/services/safety_service_live.dart:48-54 (sin chatId ni mensajes); firestore.rules:180-187 (sin hasOnly ni rate limit); functions/src/onMessageCreated.ts:25-27 sobrescribe el texto moderado; functions/src/deleteAccount.ts:28 reemplaza los mensajes
+- **Detalle:** Apple 1.2 exige filtro, reporte con 'timely responses', bloqueo y contacto publicado (verificado en developer.apple.com/app-store/review/guidelines). Google Play exige a las apps sociales y de citas estándares públicos contra CSAE, mecanismo in-app, acción sobre CSAM, reporte a la autoridad y un punto de contacto (support.google.com/googleplay/android-developer/answer/14747720). Hoy un reporte de 'posible menor' cae en una colección que nadie mira. El acosador puede borrar su cuenta y eliminar la evidencia, y el filtro actúa después de que el mensaje ya llegó al receptor.
+- **Recomendación:** Callable `submitReport` con rate limit que copie al servidor los últimos N mensajes en reports/{id}/evidence con legal hold; consola o vista de moderación con custom claim `moderator`; alerta (email o Slack) por cada reporte y prioridad para 'minor' y amenazas (SLA ≤2 h, el resto ≤24 h, medido); acciones auditadas (advertir, suspender con Auth disable, banear); protocolo de cooperación con autoridades y preservación de evidencia; mostrar el copy de 24 h solo si el SLA se mide.
+
+### PR-07 · P0 · compliance
+**Términos y estándares comunitarios inexistentes; URLs legales sin servir**
+
+- **Evidencia:** lib/core/config/app_config.dart:29-32 termsUrl=https://picaflor.app/terminos; ls web/ sin terminos.html; firebase.json:47-63 sin rewrite /terminos; curl 2026-10-07: https://picaflorapp.web.app/privacidad responde 404 'Site Not Found' (privacyPolicyUrl por defecto, app_config.dart:23-26); picaflor.app sin respuesta (connection reset, supuesto: dominio no operativo)
+- **Detalle:** El onboarding obliga a aceptar unos términos que no existen. Apple 1.2 exige un EULA con tolerancia cero al contenido objetable y 5.1.1(i) un link de privacidad que funcione; Google exige los estándares CSAE publicados y una URL de borrado operativa en Play Console. Sin estas URLs no se puede completar la ficha de ninguna tienda.
+- **Recomendación:** Publicar /terminos (EULA con tolerancia cero, conducta, CSAE, 18+, sanciones y contacto), /normas-comunidad y /seguridad-infantil en Hosting con rewrites; un único dominio en AppConfig y DEPLOY; job de CI que verifique HTTP 200 de privacidad, términos, borrado y CSAE en el canal de staging antes de cada release. El texto lo valida un abogado.
+
+### PR-08 · P0 · security
+**photoUrl acepta cualquier URL externa: filtra IPs de vecinos y se salta la moderación de imágenes**
+
+- **Evidencia:** firestore.rules:63-65 (photoUrl: cualquier string ≤500); lib/widgets/picaflor_avatar.dart:77 Image.network(photoUrl); el perfil se escribe directo desde el cliente (lib/services/user_service_live.dart ~:91 set merge)
+- **Detalle:** Un atacante pone photoUrl=https://atacante/x.png. Cada persona que lo ve en Cerca, en el chat o en la lista hace una petición a su servidor, que registra IP, hora y user-agent de gente que sabe que está a menos de 5 km. Además puede servir imágenes sexuales sin pasar por Storage ni por SafeSearch, lo que incumple Apple 1.2 y es un riesgo CSAM.
+- **Recomendación:** Guardar solo la ruta de Storage (avatars/{uid}/{file}) y que las reglas validen el patrón; una Function onObjectFinalized que quite EXIF (GPS), corra SafeSearch y recién ahí publique photoPath; test de reglas que rechace un URL externo.
+
+### PR-09 · P0 · ops
+**Flavors sin efecto y build de tienda que puede salir en demo; web demo desplegada al proyecto de producción**
+
+- **Evidencia:** app_config.dart:47-50 FLAVOR por defecto 'dev' y :14-17 DEMO_MODE por defecto true; lib/core/privacy/nearby_policy.dart:56-57 el guard solo dispara con flavor=='prod'; DEPLOY.md:83 y scripts/build_apk.ps1:9-10,25 nunca pasan FLAVOR=prod y el script usa DemoMode='true' por defecto; .firebaserc tiene solo 'picaflorapp'; lib/firebase_options.dart es un placeholder único; .github/workflows/deploy-web.yml:39,47-48 despliega el demo en channelId live de projectId picaflorapp
+- **Detalle:** Basta olvidar un --dart-define para subir a Play o TestFlight un binario con perfiles falsos, que es exactamente el S8 que v1 pedía impedir, y DemoGuard no lo detecta. Dev, staging y prod comparten el proyecto Firebase, así que una prueba puede tocar datos reales y el showcase demo vive en el mismo dominio que la app real.
+- **Recomendación:** Tres proyectos (picaflor-dev, staging y prod) con alias en .firebaserc; env/{dev,staging,prod}.json usados con --dart-define-from-file; firebase_options por flavor; guard que en release falle si FLAVOR no está definido o si demoMode && flavor!='dev'; script y CI de release que solo acepten env/prod.json; demo web solo en el proyecto dev. Test unitario de la matriz del guard y check de CI que bloquee la subida si el binario de prod contiene 'DemoNearby'.
+
+### PR-10 · P0 · compliance
+**Ley 21.719 (vigente el 2026-12-01): política incompleta, consentimiento no demostrable, export no portable y sin EIPD ni procedimiento de brechas**
+
+- **Evidencia:** web/privacidad.html:59-89 (no lista fecha de nacimiento, teléfono, tokens FCM, reportes, bloqueos, saludos ni actividad; no identifica al responsable; no da bases de licitud, plazos por categoría, transferencias internacionales, encargados como Google o CARTO, ni el derecho a reclamar ante la Agencia); onboarding_screen.dart:67-69 guarda términos y analytics solo en prefs; settings_screen.dart:419 export como Text(data.toString()); web/eliminar-cuenta.html:16 exige 'el correo de la cuenta'; no existe docs/privacy/*
+- **Detalle:** La ley crea la Agencia con facultad sancionadora (multas de hasta 20.000 UTM en infracciones gravísimas, según ecosistemastartup.com y diarioconstitucional.cl), exige comunicar las vulneraciones 'por los medios más expeditos posibles y sin dilaciones indebidas' (art. 14 sexies) y una EIPD antes de tratamientos de alto riesgo (art. 15 ter, según preyproject.com). Estas tres fuentes son secundarias; la regla es validar el texto con un abogado. La geolocalización de desconocidos a escala es un candidato claro a EIPD. Los datos salen de Chile (Firestore en São Paulo por ADR 0005; Auth y FCM en EE.UU., supuesto a validar en el DPA de Google). El consentimiento guardado solo en el dispositivo no se puede demostrar. Quien entró con teléfono o con el relay de Apple no tiene cómo pedir el borrado por web.
+- **Recomendación:** Paquete docs/privacy/: registro de actividades (finalidad, base, categorías, plazos, encargados, transferencias y su mecanismo), EIPD de geolocalización firmada antes del lanzamiento, procedimiento de brechas con plantilla, responsables y simulacro, canal ARCOP+bloqueo con plazo y registro de solicitudes, y una persona designada para cumplimiento. Consentimientos append-only en users/{uid}/consents/{id} con {tipo, versión, otorgado, serverTimestamp}, escritos por la Function y no editables por el cliente. Export como archivo JSON descargable. Formulario web de borrado con verificación por OTP. Todo con la marca 'validar con abogado'.
+
+### PR-11 · P0 · gap
+**QA sin emulador en CI: 0 tests de Functions integrados, 0 goldens, 0 Patrol**
+
+- **Evidencia:** .github/workflows/ci.yml:21-45 solo flutter (sin node, sin emulators:exec); firestore-tests/rules.test.ts tiene 11 casos que no corren en CI; no existe integration_test/; test/ tiene 6 archivos y 361 líneas (23 tests, uno de widget de 13 líneas); sin umbral de cobertura; sin tests de storage.rules
+- **Detalle:** Los tres P0 funcionales (PR-03, PR-04 y PR-05) se habrían detectado con un solo E2E en el emulador. Sin reglas probadas en CI no se puede afirmar que S1, S2 y S3 estén cerrados. Faltan casos de deny: perfil de alguien bloqueado, update/delete de mensajes, unreadCount ajeno, waves de terceros, campos extra en users y reports.
+- **Recomendación:** Job 'rules+functions' con firebase emulators:exec --only auth,firestore,storage,functions --project demo-picaflor que corra firestore-tests y una suite de integración de Functions (cascada de deleteAccount, cupo de saludos, filtros de getNearby, idempotencia del webhook, App Check); 100% de match en las reglas con casos allow/deny; cobertura ≥80% en domain/application con lcov como gate; goldens de la matriz §11.1 con Inter cargada; Patrol con los flujos de permisos de ubicación y borrado.
+
+### PR-12 · P1 · ops
+**Observabilidad inexistente: sin Crashlytics, Performance, analytics real, alertas ni SLOs**
+
+- **Evidencia:** pubspec.yaml:130-167 sin firebase_crashlytics, firebase_performance, firebase_analytics ni firebase_remote_config; lib/core/analytics/app_analytics.dart define MemoryAnalytics y `grep MemoryAnalytics lib` no encuentra ningún uso; los logs de Functions no llevan identificador correlacionable (getNearby.ts:131, deleteAccount.ts:69); docs y DEPLOY no mencionan SLO, alertas, budgets ni on-call
+- **Detalle:** No se puede medir crash-free, la latencia de Cerca ni el embudo, ni responder a un usuario que reclama (no hay forma de buscar sus eventos). Tampoco hay alertas de costo: una regresión en getNearby puede facturar cientos de dólares al día sin que nadie se entere. Sin Remote Config no hay kill switches para saludos, Cerca ni registros.
+- **Recomendación:** Crashlytics y Performance (con un trace custom de la llamada a getNearby); logs estructurados {fn, outcome, code, latencyMs, uidHash=HMAC(uid, secret)}; métricas basadas en logs y alertas en Cloud Monitoring (error de callables >2% en 5 min, p95 de getNearby sobre el objetivo, reportes 'minor' sin triage >2 h, budget al 50/90/100%); SLOs documentados en docs/ops/slo.md: crash-free users ≥99,5% en 7 días, disponibilidad de getNearby ≥99,5% y p95 en servidor ≤800 ms (supuesto inicial a calibrar con la prueba de carga), con política de error budget; Remote Config con kill switches.
+
+### PR-13 · P1 · scalability
+**getNearby caro, truncado y lento: hasta ~6.400 lecturas por llamada, N+1 en el cliente y sin prueba de carga**
+
+- **Evidencia:** functions/src/getNearby.ts:13 (150 por prefijo × 9 prefijos de precisión 5 ≈ 4,9 km), :54-61 sin orden por distancia, :80-87 (getAll de profiles, users y blocks por candidato más 2×500 waves), :15-27 chunks secuenciales; functions/src/index.ts:4 maxInstances 20 global; lib/services/user_service_live.dart:127-133 await getUser(uid) en un loop
+- **Detalle:** Peor caso: 1.350 locations + 3×1.350 getAll + 1.000 waves ≈ 6.400 lecturas por llamada. En una celda densa (Providencia o Santiago Centro, >150 personas por prefijo) el resultado es un subconjunto lexicográfico arbitrario, así que se pierde gente cercana (B5 vuelve). El cliente lee los perfiles uno por uno y la latencia crece linealmente. maxInstances 20 limita también a onMessageCreated. Sin rate limit, un cliente que refresca en loop dispara el costo.
+- **Recomendación:** Prueba de carga con k6 contra staging o el emulador (20k usuarios sembrados con densidad realista y 50 rps) que reporte p50/p95/p99, lecturas por llamada y USD por 1.000 llamadas; gate p95 ≤800 ms. Rediseño: celdas más finas cerca del caller, orden por distancia, devolver los perfiles públicos en la misma respuesta (eliminar el N+1), rate limit por uid, maxInstances por función y minInstances=1 en getNearby si el SLO lo exige.
+
+### PR-14 · P1 · security
+**Spoofing de ubicación y trilateración: updateLocation acepta cualquier coordenada del planeta**
+
+- **Evidencia:** functions/src/pure/grid.ts:13-27 (solo valida rangos ±90/±180); functions/src/updateLocation.ts:31 solo limita a 1 cada 20 s; getNearby sin rate limit; distanceBucket con cortes de 150/450/1200 m (functions/src/pure/distance.ts:59-65)
+- **Detalle:** Con 2 o 3 cuentas y ubicaciones falsas, consultando getNearby desde puntos distintos, se puede reducir la posición de una persona a su celda de ~150 m. Es el ataque clásico de trilateración contra apps de citas y anula la promesa de que la ubicación exacta nunca se comparte, sobre todo en zonas de baja densidad, donde la celda identifica una casa.
+- **Recomendación:** Rechazar coordenadas fuera del polígono del Gran Santiago (con estado 'fuera de zona'), chequear velocidad imposible (>200 km/h entre updates), poner cupo diario de cambios de ubicación y rate limit a getNearby (p. ej. ≤30 por hora por uid, supuesto), y que A12 documente un intento de trilateración en el PR con resultado fallido.
+
+### PR-15 · P1 · security
+**Secretos y supply chain: service account JSON de larga vida, sin Secret Manager, repo público sin escaneo**
+
+- **Evidencia:** .github/workflows/deploy-web.yml:46 firebaseServiceAccount: secrets.FIREBASE_SERVICE_ACCOUNT y DEPLOY.md:59-61; functions/src/revenuecatWebhook.ts:12-15 process.env.REVENUECAT_WEBHOOK_SECRET (sin defineSecret); `gh api repos/datanalytics86/Picaflorapp` → visibility public; no hay dependabot.yml, renovate, CodeQL, CODEOWNERS ni SECURITY.md; workflows sin bloque `permissions:`; actions por tag mutable (FirebaseExtended/action-hosting-deploy@v0)
+- **Detalle:** Una clave JSON filtrada da deploy a producción sin expiración. El repo es público, así que cualquier secreto commiteado por error queda expuesto al instante. Las dependencias (Firebase SDK ^3/^5, Riverpod 2) no tienen un proceso de actualización y el GITHUB_TOKEN no tiene permisos mínimos.
+- **Recomendación:** Usar GitHub OIDC con Workload Identity Federation (google-github-actions/auth) y borrar el SA JSON; defineSecret con Secret Manager para RevenueCat y API keys; activar secret scanning con push protection más gitleaks en CI; Dependabot semanal para pub, npm (functions y firestore-tests) y github-actions; CodeQL para TypeScript; `npm audit --omit=dev --audit-level=high` como gate; actions fijadas por SHA; `permissions: contents: read` por defecto; CODEOWNERS y SECURITY.md con canal de reporte.
+
+### PR-16 · P1 · ops
+**No hay CD por canales ni builds móviles en CI**
+
+- **Evidencia:** .github/workflows/ci.yml:47-51 job Android con `if: ${{ false }}`; no hay job de iOS; deploy-web.yml:4 solo workflow_dispatch al canal live, sin preview channels ni environment protection; android/app/build.gradle.kts:74-83 hace fallar cualquier tarea *Release* sin keystore, incluso en CI
+- **Detalle:** v1 pedía que la tarea de release sin keystore fallara, pero que el build sin firma quedara para CI. Hoy CI no puede compilar un release de Android ni de iOS, así que los errores de R8/proguard o de plugins nativos aparecen recién el día del release. No existe un camino a Play internal o closed testing ni a TestFlight.
+- **Recomendación:** Permitir un release sin firma solo con -PciUnsigned=true en CI; jobs `flutter build appbundle` en Ubuntu y `flutter build ipa --no-codesign` en macOS; preview channels de Hosting por PR en el proyecto dev (expiran en 7 días); en tags, deploy a staging y luego a prod con una GitHub Environment que exija revisor; subida a Play internal testing (Gradle Play Publisher o fastlane supply) y a TestFlight (fastlane pilot) con Play App Signing (upload key en secret de environment) y versionCode derivado del run.
+
+### PR-17 · P1 · compliance
+**Retención, backups y borrado incompletos**
+
+- **Evidencia:** firestore.indexes.json:37 fieldOverrides vacío (sin TTL); no se menciona PITR ni backups en DEPLOY.md ni docs; deleteAccount.ts:34-71 síncrono en una callable, sin reintentos; no limpia chats.lastMessage (onMessageCreated.ts:41-44 guarda 140 caracteres de texto), ni waves con to==uid, ni reports; no revoca el token de Sign in with Apple ni exige login reciente (grep 'revoke|reauthenticate' sin resultados)
+- **Detalle:** locations, waves y webhookEvents viven para siempre, en contra de la minimización y la retención. Un borrado que expira a mitad de camino deja la cuenta a medias y sin reintento. El preview del último mensaje de quien borró su cuenta queda en el chat. Apple pide revocar los tokens de SIWA al borrar la cuenta (supuesto, según su guía 'Offering account deletion'). Sin PITR, un bug de escritura o un borrado masivo no tiene vuelta atrás.
+- **Recomendación:** TTL en fieldOverrides (locations.expiresAt=updatedAt+7d, waves 90d, webhookEvents 30d, reports según la política legal); PITR activado más export diario programado en la misma región, con un runbook de restauración probado; deleteAccount como job idempotente (deletionRequests + Cloud Tasks con reintentos) que también limpie lastMessage y waves recibidos, revoque SIWA y exija auth_time <5 min; registro de auditoría de cada solicitud de derechos, sin PII.
+
+### PR-18 · P1 · compliance
+**Faltan los artefactos de tienda: Data Safety, Privacy Labels, PrivacyInfo.xcprivacy, clasificación por edad y notas para el revisor**
+
+- **Evidencia:** DEPLOY.md:134 solo dice 'Data Safety: ubicación aproximada'; ios/Runner sin PrivacyInfo.xcprivacy ni .entitlements; no existe docs/store/
+- **Detalle:** Los formularios deben coincidir con el código: ubicación aproximada, nombre, correo, teléfono, fecha de nacimiento, mensajes in-app, interacciones, tokens de dispositivo, fotos (futuro), cifrado en tránsito y borrado disponible. Una discrepancia provoca rechazo o retiro. Una app de conocer gente necesita una clasificación 18+, contacto publicado (Apple 1.2), punto de contacto CSAE en Play Console y una cuenta de prueba que funcione en un build con App Check.
+- **Recomendación:** docs/store/data-safety.md y apple-privacy-labels.md con una tabla dato → archivo:línea que lo recolecta, más un check en CI que avise si aparece un campo nuevo en users/profiles sin documentar; PrivacyInfo.xcprivacy; checklist con la clasificación por edad, URL de borrado, URL CSAE, contacto, cuenta demo de revisión en staging-prod y targetSdk vigente para Play.
+
+### PR-19 · P1 · ops
+**Sin respuesta a incidentes, on-call ni runbooks**
+
+- **Evidencia:** grep -i 'runbook|incident|on-call|backup|alert' en docs/, DEPLOY.md y README.md: sin resultados relevantes
+- **Detalle:** No hay plan para App Check caído (Cerca entera abajo), picos de costo de Firestore, una brecha (plazo legal 'sin dilaciones indebidas'), una ola de spam o raid, un reporte de CSAM ni un requerimiento de PDI o Fiscalía. Con un equipo de una persona, eso significa improvisar bajo presión.
+- **Recomendación:** docs/ops/: matriz de severidad, rotación de on-call (titular y respaldo), runbooks (getNearby degradado, App Check, costo, brecha, abuso masivo, CSAM, solicitud de autoridad, restauración), plantillas de comunicación a usuarios y a la Agencia, y un simulacro trimestral registrado.
+
+### PR-20 · P1 · security
+**Login por teléfono expuesto a SMS pumping y Firestore sin App Check en escrituras directas**
+
+- **Evidencia:** lib/screens/auth/login_screen.dart:108-121 (OTP por teléfono); no hay configuración de regiones SMS ni App Check en el cliente; reports y mensajes se escriben directo en Firestore (safety_service_live.dart:48)
+- **Detalle:** Sin una allowlist de regiones (+56) ni defensa anti-bot, el envío de OTP se puede abusar para fraude de tarifas SMS (supuesto: requiere Identity Platform para la política de regiones). Las escrituras directas (reportes y mensajes) se pueden automatizar con un token robado.
+- **Recomendación:** Política de regiones SMS solo para Chile, cuotas y alerta de costo de SMS; App Check enforcement en Firestore después de PR-03; rate limit de reportes y mensajes vía callable o contador en reglas.
+
+### PR-21 · P1 · false_claim
+**README, BASELINE y ADR afirman como hecho lo que no funciona**
+
+- **Evidencia:** README.md 'Estado': 'Cerca por buckets ✅', 'Saludo, bloqueo, reporte, borrar cuenta ✅', 'CI (gates, analyze, test, web) en todo push y PR ✅'; docs/BASELINE.md 'No issues found!'; ADR 0003 'Si el humano aún no configuró App Check…'; docs/PLAN.md:3 'La orden de esta sesión fue ejecutar sin detenerse' frente a la §15 v1 'No empieces la Fase 1 hasta que apruebe el plan'; un solo commit 155b6f6 de ~10k líneas frente al límite de PRs ≤400
+- **Detalle:** El humano no puede confiar en el estado documentado: con CI rojo y los PR-03/04/05, nada de eso funciona en producción. Un commit monolítico hace imposible revisar o revertir por tema.
+- **Recomendación:** En v2, cada ✅ de README o BASELINE enlaza la URL de un run de CI verde y el nombre del test que lo prueba; PRs ≤400 líneas con descripción, evidencia y riesgos; prohibido declarar 'hecho' sin el E2E de emulador del PR-11.
+
+### PR-22 · P2 · design
+**Filtro de moderación ingenuo y a posteriori**
+
+- **Evidencia:** functions/src/pure/moderate.ts:1-32 (27 frases; incluye 'https://', 'www.' y 'telegram'); onMessageCreated.ts:25-27 modera después de entregar el mensaje
+- **Detalle:** Bloquea cualquier link legítimo (falsos positivos), es trivial de evadir (con espacios o leetspeak) y el receptor ya vio el mensaje antes de que se reescriba. No cumple bien el 'filtrar antes de publicar' de Apple 1.2.
+- **Recomendación:** Moderación previa al envío (callable sendMessage o cola) con clasificador más lista es-CL, guardando el original en moderationQueue con acceso restringido; métricas de falsos positivos; tests con corpus es-CL.
+
+### PR-23 · P2 · security
+**Hosting sin cabeceras de seguridad y otros detalles de licencia y operación**
+
+- **Evidencia:** firebase.json:65-101 solo Cache-Control (sin CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy ni frame-ancestors); no hay LicenseRegistry para Inter (grep sin resultados); onMessageCreated.ts:58-70 no limpia los tokens FCM inválidos
+- **Detalle:** La PWA queda expuesta a clickjacking y a XSS sin mitigación. La licencia OFL se cumple vía los metadatos del TTF, pero no aparece en la pantalla de licencias. Los tokens muertos inflan los envíos y los errores.
+- **Recomendación:** Agregar las cabeceras (Permissions-Policy geolocation=(self)); LicenseRegistry.addLicense para Inter; borrar los tokens con error registration-token-not-registered; SBOM (CycloneDX para npm y la app) adjunto a cada release.
+
+**Requisitos que esta lente exige para la v2**
+
+- CI reproducible: versión exacta de Flutter (flutter-version-file o versión fija), runner fijado (ubuntu-24.04 y macos-15), actions fijadas por SHA, `permissions: contents: read`; jobs requeridos en main: flutter (format, analyze --fatal-infos, test con cobertura ≥80% en domain/application como gate), functions (npm ci, lint, build y test), rules+functions en emulador, android appbundle sin firma (-PciUnsigned=true), ios --no-codesign y web. Evidencia: URL del run verde en cada PR y en BASELINE.md.
+- Functions desplegables: engines node 22 (o 24) antes del 2026-10-30, tsconfig.build.json sin *.test.ts, predeploy [lint, build] en firebase.json; el CI produce lib/index.js como artefacto.
+- Suite E2E de Functions en emulador (`firebase emulators:exec --only auth,firestore,storage,functions --project demo-picaflor`) que cubra updateLocation → getNearby (otra cuenta ve el bucket) → sendWave → respondWave → mensaje → blockUser → deleteAccount (cascada completa) → exportMyData. Debe fallar con el código actual de Grok (lectura después de escritura y birthDate faltante) y pasar en v2.
+- App Check de punta a punta: firebase_app_check activado antes de la primera callable (Play Integrity, App Attest con fallback DeviceCheck y reCAPTCHA Enterprise en web); debug provider solo en dev; enforcement en Functions, Firestore y Storage tras 7 días en modo monitor; test que verifique el rechazo sin token.
+- Onboarding en servidor: callable completeOnboarding valida 18+ y escribe users.birthDate; reglas que hacen birthDate inmutable; consentimientos append-only en users/{uid}/consents con {tipo, versión, otorgado, serverTimestamp} escritos solo por la Function; tests de reglas allow/deny.
+- Flavors reales: 3 proyectos Firebase (dev, staging y prod) con alias en .firebaserc, env/<flavor>.json con --dart-define-from-file y firebase_options por flavor; el guard de arranque falla en release si FLAVOR no está definido o si demoMode && flavor!='dev'; la demo web solo se despliega en dev; check de CI que impide subir a tienda un binario de prod que contenga DemoNearby o DemoStore.
+- CD por canales: preview channel de Hosting por PR (dev, 7 días); tag → staging → prod con una GitHub Environment que exija revisor; Play internal testing y TestFlight automatizados con Play App Signing; versionCode derivado del CI.
+- Secretos: GitHub OIDC con Workload Identity Federation para todos los deploys (prohibido el SA JSON); defineSecret con Secret Manager para RevenueCat y API keys; secret scanning con push protection y gitleaks en CI; Dependabot semanal (pub, npm ×2 y actions); CodeQL; npm audit high como gate; SBOM CycloneDX en cada release.
+- Observabilidad y SLOs: Crashlytics y Performance (trace de getNearby); logs estructurados con uidHash (HMAC); alertas en Cloud Monitoring (error de callables >2% en 5 min, p95 de getNearby sobre el objetivo, reportes 'minor' sin triage >2 h, budget al 50/90/100%); docs/ops/slo.md con crash-free users ≥99,5% en 7 días y getNearby con disponibilidad ≥99,5% y p95 ≤800 ms (a calibrar), más política de error budget; Remote Config con kill switches (saludos, Cerca y registros).
+- Prueba de carga de getNearby (k6 contra staging o el emulador, 20k usuarios sembrados con densidad realista y 50 rps) con informe de p50/p95/p99, lecturas por llamada y USD por 1.000 llamadas; gate de p95; eliminar el N+1 de perfiles en el cliente; rate limit por uid y maxInstances por función.
+- Trust & Safety operativo: callable submitReport con rate limit y evidencia copiada en el servidor (últimos N mensajes, legal hold); vista de moderación con custom claim moderator y acciones auditadas (advertir, suspender, banear); alerta por reporte; SLA medido (minor y amenazas ≤2 h, resto ≤24 h); el copy de '24 h' se muestra solo si existe la medición; protocolo de cooperación con autoridades y preservación de evidencia; punto de contacto CSAE registrado en Play Console.
+- Moderación: filtro previo al envío (no reescritura posterior) con clasificador más lista es-CL y original guardado en una cola restringida; avatares solo como ruta de Storage validada por reglas, con una Function que quite EXIF y corra SafeSearch antes de publicar; test de reglas que rechace un photoUrl externo.
+- Publicar y verificar en CI (HTTP 200 en staging): /privacidad, /terminos (EULA con tolerancia cero), /normas-comunidad, /seguridad-infantil (CSAE) y /eliminar-cuenta, con un único dominio en AppConfig y DEPLOY.
+- Paquete Ley 21.719 en docs/privacy/: registro de actividades, EIPD de geolocalización previa al lanzamiento, procedimiento de brechas (art. 14 sexies) con simulacro, transferencias internacionales (Brasil y EE.UU.) con su mecanismo, encargados (Google, CARTO, RevenueCat), canal ARCOP+bloqueo con plazo y registro, y persona designada; política de privacidad con el contenido mínimo; export como archivo JSON descargable; borrado web con OTP para cuentas sin correo. Todo marcado 'validar con abogado'.
+- Retención y continuidad: TTL declarado en firestore.indexes.json (locations 7 días, waves 90 días, webhookEvents 30 días, reports según la política); PITR activado y export diario con restauración probada (runbook); deleteAccount como job idempotente con reintentos que limpie lastMessage y waves recibidos, revoque SIWA y exija login reciente.
+- Anti-abuso de ubicación y auth: updateLocation rechaza coordenadas fuera del Gran Santiago y velocidades imposibles; getNearby con rate limit; A12 documenta un intento de trilateración fallido; política de regiones SMS (+56) y alerta de costo de OTP.
+- Artefactos de tienda: docs/store/data-safety.md y apple-privacy-labels.md con trazabilidad dato → archivo:línea; PrivacyInfo.xcprivacy; clasificación 18+; contacto publicado en la app y la ficha; cuenta de revisión que funcione en un build con App Check; targetSdk vigente en Play.
+- Operación: docs/ops/ con matriz de severidad, on-call (titular y respaldo) y runbooks (App Check, costo, brecha, abuso masivo, CSAM, solicitud de autoridad, restauración) más plantillas de comunicación.
+- Proceso: PRs ≤400 líneas con evidencia; ningún ✅ en README o BASELINE sin enlace al run y al test; el agente se detiene donde el megaprompt lo indica, y una orden de 'no detenerse' no se registra como excusa en PLAN.md.
+
+**Cifras clave**
+
+| Métrica | Valor | Base |
+|---------|-------|------|
+| Runs de CI de la rama grok/picaflor-v2-061026 | 2 de 2 fallidos (push y PR #1, draft), falla en Analyze con 5 issues | gh run list / gh run view 37550737612 --log-failed (verificado 2026-10-07) |
+| Flutter en CI contra la línea base | 3.47.6 (CI) contra 3.44.7 (BASELINE local) | log del run 37550737612 (FLUTTER_ROOT) y docs/BASELINE.md |
+| Días hasta el decommission de Node 20 en Cloud Run functions | 23 (2026-10-30) | https://docs.cloud.google.com/functions/1stgendocs/runtime-support (verificado) |
+| Días hasta la vigencia de la Ley 21.719 | 55 (2026-12-01) | diarioconstitucional.cl 2026-06-12 y preyproject.com; cálculo desde 2026-10-07 |
+| Multa máxima Ley 21.719 (gravísima) | 20.000 UTM (~USD 1,5M) | ecosistemastartup.com (fuente secundaria, validar con abogado) |
+| Callables bloqueadas por App Check sin SDK en el cliente | 8 de 8 | functions/src/https.ts:7 + index.ts; pubspec.yaml sin firebase_app_check |
+| Lecturas de Firestore por llamada a getNearby (peor caso) | ~6.400 (9×150 locations + 3×1.350 getAll + 2×500 waves) | functions/src/getNearby.ts:13,54-87 (cálculo propio) |
+| Costo estimado de getNearby con 100k llamadas por día en el peor caso | ~USD 380 por día | supuesto: USD 0,06 por 100k lecturas (precio de referencia; southamerica-east1 puede ser mayor) |
+| Tests actuales | Flutter 23 (361 líneas, 1 de widget) · Functions 10 puros · reglas 11 (fuera de CI) · integración 0 · goldens 0 · Patrol 0 | test/, functions/src/pure.test.ts, firestore-tests/rules.test.ts, ausencia de integration_test/ |
+| Términos en el filtro de moderación | 27 (22 de spam y 5 de abuso) | functions/src/pure/moderate.ts:1-32 |
+| URL de privacidad por defecto | HTTP 404 'Site Not Found' | curl https://picaflorapp.web.app/privacidad (2026-10-07) |
+| Tamaño del cambio de Grok | 1 commit, 132 archivos, +10.080/-1.231 líneas | git diff --stat 02abbd4 HEAD |
 

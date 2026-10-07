@@ -97,7 +97,7 @@ tasks:
     wave: W1
     lane: L1
     title: updateLocation - lecturas antes de escrituras + plausibilidad (ciudad, velocidad, celdas/día) + lastActiveAt
-    closes: [V-05, CV-01, BE-05a, SC-07]
+    closes: [V-05, CV-01, PR-04, PR-14, SC-07]
     depends_on: [T003]
     owns_paths: ["functions/src/updateLocation.ts", "functions/src/pure/grid.ts", "functions/src/pure/rateLimit.ts"]
     acceptance:
@@ -107,7 +107,7 @@ tasks:
     wave: W1
     lane: L1
     title: Callable completeOnboarding - birthDate inmutable, profiles.age, consentEvents append-only
-    closes: [V-06, FL-02, BE-04, CV-02, T1-05, FL-12, BE-11]
+    closes: [V-06, FL-02, BE-04, CV-02, T1-05, FL-12, BE-11, PR-05]
     depends_on: [T003]
     owns_paths: ["functions/src/onboarding/**", "contracts/onboarding*.json"]
     touches_shared: ["firestore.rules"]
@@ -130,7 +130,7 @@ tasks:
     wave: W1
     lane: L3
     title: App Check en el cliente (Play Integrity / App Attest+DeviceCheck / reCAPTCHA Enterprise / debug en dev)
-    closes: [V-07, FL-01, BE-02, CV-07, SC-04]
+    closes: [V-07, FL-01, BE-02, CV-07, SC-04, PR-03]
     depends_on: [T002]
     owns_paths: ["lib/core/network/app_check*.dart", "lib/firebase_boot.dart"]
     touches_shared: ["pubspec.yaml", "pubspec.lock"]
@@ -210,7 +210,7 @@ tasks:
     wave: W1
     lane: L3
     title: Flavors reales + guard de release + demo web en un site o canal separado
-    closes: [FL-25, CV-16, B7]
+    closes: [FL-25, CV-16, B7, PR-09]
     depends_on: [T002]
     owns_paths: ["env/**", "lib/core/config/**"]
     touches_shared: ["lib/main.dart", "firebase.json", ".github/workflows/**"]
@@ -221,6 +221,7 @@ tasks:
     wave: W1
     lane: L5
     title: E2E del loop completo contra emuladores (gate de salida de W1)
+    closes: [PR-11]
     depends_on: [T103, T107, T109, T110, T111]
     owns_paths: ["integration_test/loop_e2e_test.dart", "tool/emulator/**"]
     acceptance:
@@ -231,7 +232,7 @@ tasks:
     wave: W2
     lane: L6
     title: nearbyIndex desnormalizado + cobertura por radio + K más cercanos + cursor + tarjeta en la respuesta
-    closes: [V-12, V-13, BE-08, BE-09, SC-01, SC-02, SC-03, MO-05, MO-06, CV-14]
+    closes: [V-12, V-13, BE-08, BE-09, SC-01, SC-02, SC-03, MO-05, MO-06, CV-14, PR-13]
     depends_on: [T113]
     owns_paths: ["functions/src/nearby/**", "functions/src/pure/geohash.ts"]
     touches_shared: ["firestore.indexes.json"]
@@ -312,12 +313,14 @@ tasks:
     wave: W2
     lane: L8
     title: Moderación - reportUser, moderationQueue con prioridad, claim banned, consola admin mínima, auto-ocultar, métrica de SLA
-    closes: [BE-18, BE-25, SC-21, T1-06]
+    closes: [BE-18, BE-25, SC-21, T1-06, PR-06, PR-22]
     depends_on: [T205]
     owns_paths: ["functions/src/safety/**", "tool/admin/**"]
     acceptance:
       - "Emulador: N reportes únicos -> oculto de Cerca; banned -> todas las escrituras y callables rechazados"
       - "El mensaje marcado queda pending, no se entrega y se avisa al emisor"
+      - "Al reportar se copian los últimos N mensajes a reports/{id}/evidence con legal hold; sobreviven al borrado de cuenta (test)"
+      - "Alerta por reporte; SLA medido: posible menor y amenazas <= 2 h, resto <= 24 h; acciones del moderador auditadas"
   - id: T210
     wave: W2
     lane: L6
@@ -445,7 +448,7 @@ tasks:
     wave: W3
     lane: L1
     title: Pipeline de fotos - image_picker 4:5, compresión, storage.rules, trigger sin EXIF + SafeSearch + blurhash, fotos en web
-    closes: [D9, T1-03, BE-19]
+    closes: [D9, T1-03, BE-19, PR-08]
     depends_on: [T205]
     owns_paths: ["functions/src/media/**", "storage-tests/**", "lib/features/profile/data/photos*"]
     touches_shared: ["storage.rules", "pubspec.yaml", "pubspec.lock"]
@@ -491,22 +494,25 @@ tasks:
     wave: W4
     lane: L8
     title: Paquete Ley 21.719 - RAT, EIPD geo/biometría, transferencia internacional, brechas, retención, centro de consentimientos
-    closes: [S12, CV-12]
+    closes: [S12, CV-12, PR-07, PR-10]
     depends_on: [T102]
     owns_paths: ["docs/legal/**", "web/terminos.html", "web/privacidad.html"]
     touches_shared: ["firebase.json"]
     acceptance:
       - "docs/legal/checklist-21719.md completo con los 9 puntos de §7.6, marcado 'requiere validación legal'"
-      - "/terminos y /privacidad responden 200 en el mismo dominio (test de hosting)"
+      - "/privacidad, /terminos, /normas-comunidad, /seguridad-infantil (CSAE) y /eliminar-cuenta responden 200 en staging (job de CI)"
+      - "Política de privacidad con el contenido mínimo de la ley; RAT, EIPD, brechas, transferencias y canal ARCOP en docs/legal/"
   - id: T402
     wave: W4
     lane: L1
     title: deleteAccount durable - cola, worker idempotente, cascada completa, revokeRefreshTokens, auth_time, RevenueCat
-    closes: [BE-15, SC-16, CV-12, MO-13]
+    closes: [BE-15, SC-16, CV-12, MO-13, PR-17]
     depends_on: [T113]
     owns_paths: ["functions/src/account/delete*.ts"]
     acceptance:
       - "Usuario con 10k mensajes en 200 chats -> borrado completo (test de barrido = 0 docs con el uid, salvo los declarados)"
+      - "Anti-zombie: con deletionRequests/{uid} presente, toda escritura del cliente con el token viejo es denegada por reglas y callables (test)"
+      - "Revocación del token de Sign in with Apple vía REST (con un fake en test)"
   - id: T403
     wave: W4
     lane: L1
@@ -538,7 +544,7 @@ tasks:
     wave: W4
     lane: L5
     title: Cumplimiento de tiendas - entitlement de SIWA, PrivacyInfo, data-map, Data safety, edad, notas de revisión, fastlane es-CL, capturas por integration_test
-    closes: [T1-28, FL-24, STORE-1]
+    closes: [T1-28, FL-24, STORE-1, PR-18]
     depends_on: [T304, T313]
     owns_paths: ["fastlane/**", "docs/store/**", "ios/Runner/*.entitlements", "ios/Runner/PrivacyInfo.xcprivacy"]
     acceptance:
@@ -547,12 +553,23 @@ tasks:
     wave: W4
     lane: L8
     title: Cabeceras de seguridad de Hosting + /eliminar-cuenta funcional en web
-    closes: [BE-26]
+    closes: [BE-26, PR-23]
     depends_on: [T402]
     touches_shared: ["firebase.json"]
     owns_paths: ["web/eliminar-cuenta.html"]
     acceptance:
       - "curl -I en el preview channel muestra CSP, frame-ancestors, Referrer-Policy, Permissions-Policy y nosniff"
+
+  - id: T408
+    wave: W4
+    lane: L1
+    title: Auth por teléfono - regiones SMS solo +56, cuotas, alerta de costo de OTP; LicenseRegistry de Inter
+    closes: [PR-20, PR-23]
+    depends_on: [T104]
+    owns_paths: ["docs/ops/sms-policy.md", "lib/app/licenses.dart"]
+    acceptance:
+      - "Política de regiones SMS documentada y aplicada en el proyecto dev (decisión del humano para prod); alerta de costo configurada"
+      - "Inter aparece en la página de licencias (widget test)"
 
   # ───────────────────────── W5 · Monetización + growth + analytics (flag apagado) ─────────────────────────
   - id: T501
@@ -654,21 +671,24 @@ tasks:
     wave: W6
     lane: L5
     title: Observabilidad - Crashlytics y Performance sin PII, logs estructurados, SLOs, alertas, PITR/backups, runbooks
-    closes: [PR-obs]
+    closes: [PR-12, PR-17, PR-19]
     depends_on: [T113]
     owns_paths: ["docs/ops/**", "lib/core/errors/**"]
     touches_shared: ["pubspec.yaml", "pubspec.lock"]
     acceptance:
-      - "SLOs documentados con alertas; runbooks de incidente, abuso, pico de costo, brecha y App Review"
+      - "SLOs documentados con alertas; logs con uidHash (HMAC)"
+      - "PITR activado + export diario + simulacro de restauración registrado"
+      - "docs/ops: matriz de severidad, on-call, runbooks (getNearby, App Check, costo, brecha, abuso, CSAM, autoridad, restauración, App Review)"
   - id: T602
     wave: W6
     lane: L5
     title: CI/CD completo - builds Android/iOS, preview channels, OIDC, Dependabot, CodeQL, secret scanning, SBOM, licencias
-    closes: [FL-21, PR-cicd]
+    closes: [FL-21, PR-15]
     depends_on: [T005]
     touches_shared: [".github/**"]
     acceptance:
-      - "build apk --release (keystore efímero) y build ios --no-codesign en verde; sin JSON de service account en secrets"
+      - "build appbundle (sin firma / keystore efímero) y build ipa --no-codesign (macOS) en verde"
+      - "OIDC/Workload Identity (sin JSON de service account); actions fijadas por SHA; permissions: contents: read; gitleaks; npm audit high como gate; Dependabot; CodeQL; SBOM"
   - id: T603
     wave: W6
     lane: L5
@@ -681,7 +701,17 @@ tasks:
     wave: W6
     lane: V
     title: RECONCILE final + campaña completa de Red Team (§8.5) + scorecard Tier-1 + reporte final
-    depends_on: [T113, T203, T210, T313, T406, T507, T601, T602, T603]
+    depends_on: [T113, T203, T210, T313, T406, T408, T507, T601, T602, T603, T605]
     owns_paths: ["docs/v2/verify/**", "docs/v2/redteam/**", "docs/v2/report-final.json"]
     acceptance:
       - "Scorecard de §3 al 100% o con cada brecha en BLOCKED con decisión; los 16 ataques de §8.5 documentados"
+  - id: T605
+    wave: W6
+    lane: L5
+    title: CD por canales - preview channels por PR, tag -> staging -> prod con GitHub Environment y revisor, Play internal + TestFlight vía fastlane
+    closes: [PR-16]
+    depends_on: [T602, T406]
+    owns_paths: ["fastlane/Fastfile", "docs/ops/release.md"]
+    touches_shared: [".github/workflows/**"]
+    acceptance:
+      - "Pipeline documentado y probado en dev/staging; el job de prod existe pero requiere revisor humano (I1); versionCode derivado del CI"
