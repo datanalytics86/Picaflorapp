@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../core/prefs/key_value_store.dart';
 
 import '../core/config/app_config.dart';
 import '../core/constants/app_constants.dart';
@@ -84,7 +84,7 @@ class LocationController extends StateNotifier<LocationState> {
   }
 
   final LocationService _location;
-  final SharedPreferences _prefs;
+  final KeyValueStore _prefs;
   final Ref _ref;
 
   Future<void> checkPermission() async {

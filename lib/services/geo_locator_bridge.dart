@@ -93,7 +93,7 @@ Future<ApproxLocation> geoGetApproxLocation({
     }
 
     position ??= await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.medium,
+      desiredAccuracy: LocationAccuracy.low,
       timeLimit: const Duration(seconds: 8),
     );
 

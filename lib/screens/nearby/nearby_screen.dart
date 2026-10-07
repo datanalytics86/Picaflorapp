@@ -18,6 +18,7 @@ import '../../router/app_router.dart';
 import '../../services/location_service.dart';
 // flutter_map se carga SOLO al abrir la pestaña Mapa (evita freeze al boot).
 import '../../widgets/nearby_map.dart' deferred as map_lib;
+import '../../widgets/public_profile_sheet.dart';
 import '../../widgets/picaflor_card.dart';
 import '../../widgets/picaflor_empty_state.dart';
 import '../../widgets/picaflor_permission_dialog.dart';
@@ -193,6 +194,32 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     }
   }
 
+  Future<void> _openPerson(String otherUid, {bool fromMap = false}) async {
+    if (AppConfig.wavesEnabled) {
+      final result = ref.read(nearbyUsersProvider).valueOrNull;
+      double? meters;
+      if (result != null) {
+        for (final person in result.people) {
+          if (person.user.uid == otherUid) {
+            meters = person.distanceMeters;
+            break;
+          }
+        }
+      }
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) => PublicProfileSheet(
+          uid: otherUid,
+          distanceMeters: meters,
+        ),
+      );
+      return;
+    }
+    await _openChat(otherUid, fromMap: fromMap);
+  }
+
   Future<void> _openChat(String otherUid, {bool fromMap = false}) async {
     if (_openingChat) return;
     if (otherUid.isEmpty) return;
@@ -341,7 +368,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                     nearby: nearby,
                     onRefresh: _onRefresh,
                     onRequestPermission: _requestWithDialog,
-                    onOpenChat: (uid) => _openChat(uid),
+                    onOpenChat: (uid) => _openPerson(uid),
                   ),
                   _mapEverOpened
                       ? _MapBody(
@@ -355,7 +382,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                           mapLibLoading: _mapLibLoading,
                           onRefresh: _onRefresh,
                           onOpenChat: (uid) =>
-                              _openChat(uid, fromMap: true),
+                              _openPerson(uid, fromMap: true),
                         )
                       : const SizedBox.shrink(),
                 ],
@@ -415,7 +442,6 @@ class _Header extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.55,
                         height: 1.1,
-                        fontSize: wide ? 26 : 22,
                       ),
                     ),
                     SizedBox(height: wide ? 6 : 5),
@@ -426,7 +452,6 @@ class _Header extends StatelessWidget {
                             ? AppColors.darkTextSecondary
                             : AppColors.lightTextSecondary,
                         height: 1.35,
-                        fontSize: wide ? 14 : 13,
                       ),
                     ),
                   ],
@@ -468,7 +493,7 @@ class _ViewModeToggle extends StatelessWidget {
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkSurfaceElevated : AppColors.lightChip,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(
           color: isDark
               ? AppColors.darkBorder
@@ -541,12 +566,12 @@ class _ToggleSegment extends StatelessWidget {
                       ? AppColors.primary.withValues(alpha: 0.2)
                       : AppColors.lightSurface)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
               boxShadow: selected && !isDark
                   ? [
                       BoxShadow(
                         color:
-                            const Color(0xFF0C0F14).withValues(alpha: 0.07),
+                            AppColors.inkShadow.withValues(alpha: 0.07),
                         blurRadius: 5,
                         offset: const Offset(0, 1),
                       ),
@@ -567,7 +592,6 @@ class _ToggleSegment extends StatelessWidget {
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: 12.5,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       letterSpacing: -0.1,
                       color: selected ? selectedColor : idleColor,
@@ -600,10 +624,10 @@ class _RefreshButton extends StatelessWidget {
       message: 'Actualizar',
       child: Material(
         color: isDark ? AppColors.darkSurfaceElevated : AppColors.lightChip,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: InkWell(
           onTap: isRefreshing ? null : () => onRefresh(),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           child: SizedBox(
             width: 38,
             height: 38,
@@ -682,7 +706,7 @@ class _RadiusCard extends StatelessWidget {
                         color: isDark
                             ? AppColors.primary.withValues(alpha: 0.14)
                             : AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                       ),
                       child: Icon(
                         Icons.radar_rounded,
@@ -697,7 +721,6 @@ class _RadiusCard extends StatelessWidget {
                       'Radio de búsqueda',
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        fontSize: 13.5,
                         color: isDark
                             ? AppColors.darkTextPrimary
                             : AppColors.lightTextPrimary,
@@ -723,7 +746,6 @@ class _RadiusCard extends StatelessWidget {
                               : AppColors.primaryDark,
                           fontWeight: FontWeight.w700,
                           letterSpacing: -0.1,
-                          fontSize: 12.5,
                         ),
                       ),
                     ),
@@ -771,7 +793,6 @@ class _RadiusCard extends StatelessWidget {
                           color: isDark
                               ? AppColors.darkTextTertiary
                               : AppColors.lightTextTertiary,
-                          fontSize: 10.5,
                         ),
                       ),
                       const Spacer(),
@@ -783,7 +804,6 @@ class _RadiusCard extends StatelessWidget {
                           color: isDark
                               ? AppColors.darkTextTertiary
                               : AppColors.lightTextTertiary,
-                          fontSize: 10.5,
                         ),
                       ),
                     ],

@@ -1,10 +1,6 @@
 name: CI
 
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+on: [push, pull_request]
 
 jobs:
   analyze-test-web:
@@ -25,11 +21,14 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      - name: Static gates
+        run: bash tool/gates.sh
+
       - name: Analyze
         run: flutter analyze --fatal-infos
 
       - name: Test
-        run: flutter test
+        run: flutter test --coverage
 
       - name: Build Web (demo)
         run: |

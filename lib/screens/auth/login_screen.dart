@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/app_config.dart';
+import '../../core/design_system/components/pf_mark.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
@@ -181,8 +182,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           borderRadius:
                               BorderRadius.circular(AppSpacing.radiusMd + 2),
                         ),
-                        child: const Icon(
-                          Icons.pets_rounded,
+                        child: const PfMark(
                           color: Colors.white,
                           size: 28,
                         ),
@@ -397,7 +397,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         padding: const EdgeInsets.all(AppSpacing.sm + 2),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF3D1515)
+                              ? AppColors.errorContainerDark
                               : AppColors.errorSoft,
                           borderRadius:
                               BorderRadius.circular(AppSpacing.radiusSm + 2),
@@ -488,7 +488,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     PicaflorSocialButton(
                       label: 'Google',
                       onPressed: auth.isLoading ? null : _google,
-                      icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
+                      icon: const Text(
+                        'G',
+                        semanticsLabel: 'Google',
+                      ),
                     ),
                     if (_showApple) ...[
                       const SizedBox(height: AppSpacing.sm),

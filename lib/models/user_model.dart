@@ -20,6 +20,8 @@ class UserModel extends Equatable {
     this.createdAt,
     this.updatedAt,
     this.fcmToken,
+    this.age,
+    this.activityBucket,
   });
 
   final String uid;
@@ -36,6 +38,8 @@ class UserModel extends Equatable {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String? fcmToken;
+  final int? age;
+  final String? activityBucket;
 
   bool get hasLocation => latitude != null && longitude != null;
 
@@ -67,6 +71,8 @@ class UserModel extends Equatable {
       createdAt: _toDate(map['createdAt']),
       updatedAt: _toDate(map['updatedAt']),
       fcmToken: map['fcmToken'] as String?,
+      age: (map['age'] as num?)?.toInt(),
+      activityBucket: map['activityBucket'] as String?,
     );
   }
 
@@ -87,6 +93,8 @@ class UserModel extends Equatable {
       'createdAt': createdAt?.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'fcmToken': fcmToken,
+      if (age != null) 'age': age,
+      if (activityBucket != null) 'activityBucket': activityBucket,
     };
   }
 
@@ -122,6 +130,8 @@ class UserModel extends Equatable {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? fcmToken,
+    int? age,
+    String? activityBucket,
     bool clearPhoto = false,
   }) {
     return UserModel(
@@ -139,6 +149,8 @@ class UserModel extends Equatable {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       fcmToken: fcmToken ?? this.fcmToken,
+      age: age ?? this.age,
+      activityBucket: activityBucket ?? this.activityBucket,
     );
   }
 
@@ -172,5 +184,7 @@ class UserModel extends Equatable {
         createdAt,
         updatedAt,
         fcmToken,
+        age,
+        activityBucket,
       ];
 }

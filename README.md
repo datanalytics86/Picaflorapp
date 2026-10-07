@@ -2,7 +2,7 @@
 
 App Flutter + Firebase para conocer gente cerca en el **Gran Santiago**.
 
-Diseño minimalista estilo Fintual/BCI: whitespace generoso, Poppins, cards suaves, textos en español chileno.
+Diseño sobrio (la barra de calidad es la de un producto financiero chileno, sin copiar marcas): espacio en blanco, Inter, bordes finos, textos en español chileno. La privacidad manda: la coordenada exacta no vive en un documento que el cliente pueda leer.
 
 > **Deploy:** ver [DEPLOY.md](./DEPLOY.md) — checklist completo web / Android / iOS / Firebase.
 
@@ -10,17 +10,16 @@ Diseño minimalista estilo Fintual/BCI: whitespace generoso, Poppins, cards suav
 
 | Capa | Estado |
 |------|--------|
-| Design system + widgets | ✅ |
-| Auth (email, Google, Apple, phone) + demo | ✅ |
-| Location approx (~150 m fuzz) | ✅ |
-| Nearby + chat + perfil + settings | ✅ |
-| Router + redirects | ✅ |
-| Firestore rules + indexes + Storage rules | ✅ |
-| Android release (minSdk 23, ProGuard, signing) | ✅ |
-| Web PWA + Firebase Hosting config | ✅ |
-| CI (analyze / test / build web) | ✅ |
-| Firebase real (`flutterfire configure`) | ⬜ manual |
-| Keystore / Play Store / App Store | ⬜ manual |
+| Design system v2 + gate de literales | ✅ en esta rama |
+| Auth + demo | ✅ |
+| Cerca por buckets, sin coordenada en el cliente | ✅ |
+| Saludo, bloqueo, reporte, borrar cuenta, Plus en espera | ✅ |
+| Firestore rules + Functions (sin deploy) | ✅ código, ⬜ deploy |
+| Android release sin keystore | falla a propósito |
+| CI (gates, analyze, test, web) en todo push y PR | ✅ |
+| Firebase real, App Check, tiendas | ⬜ una persona |
+
+Detalle de la pasada: [docs/BASELINE.md](docs/BASELINE.md) y [docs/PLAN.md](docs/PLAN.md).
 
 ## Modo demo (default)
 
@@ -75,7 +74,8 @@ Detalle en [DEPLOY.md](./DEPLOY.md).
 | Path | Pantalla |
 |------|----------|
 | `/splash` | Splash |
-| `/onboarding` | 2 slides |
+| `/onboarding` | 2 slides + edad y términos |
+| `/plus` | Lista de espera Plus |
 | `/login` | Email / teléfono / Google / Apple |
 | `/home` | Nearby |
 | `/chat-list` | Lista de chats |

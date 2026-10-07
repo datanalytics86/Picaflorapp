@@ -42,4 +42,35 @@ abstract final class AppConfig {
   static const String demoDisplayName = 'Tú (demo)';
   static const String demoBio =
       'Explorando Picaflor en modo demo · sin Firebase';
+
+  /// `dev` (demo), `staging` o `prod`. Proyectos Firebase separados.
+  static const String flavor = String.fromEnvironment(
+    'FLAVOR',
+    defaultValue: 'dev',
+  );
+
+  /// Saludo con aceptación. Encendido por defecto (Guideline 1.2 / acoso).
+  static const bool wavesEnabled = bool.fromEnvironment(
+    'WAVES_ENABLED',
+    defaultValue: true,
+  );
+
+  /// Plus se construye apagado hasta que haya liquidez (Remote Config / define).
+  static const bool plusEnabled = bool.fromEnvironment(
+    'PLUS_ENABLED',
+    defaultValue: false,
+  );
+
+  /// Tiles del mapa. Vacío = CARTO con atribución visible.
+  static const String mapTileUrl = String.fromEnvironment(
+    'MAP_TILE_URL',
+    defaultValue: '',
+  );
+
+  static const String mapTileUrlDark = String.fromEnvironment(
+    'MAP_TILE_URL_DARK',
+    defaultValue: '',
+  );
+
+  static const String region = 'southamerica-east1';
 }

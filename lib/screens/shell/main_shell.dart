@@ -67,7 +67,7 @@ class MainShell extends ConsumerWidget {
               ? null
               : [
                   BoxShadow(
-                    color: const Color(0xFF0C0F14).withValues(alpha: 0.04),
+                    color: AppColors.inkShadow.withValues(alpha: 0.04),
                     blurRadius: 12,
                     offset: const Offset(0, -2),
                   ),
@@ -309,12 +309,11 @@ class _BrandMark extends StatelessWidget {
           ),
         ],
       ),
-      child: Text(
+      child: const Text(
         'P',
         style: TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w800,
-          fontSize: size * 0.42,
           height: 1,
           letterSpacing: -0.5,
         ),

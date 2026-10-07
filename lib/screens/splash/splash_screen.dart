@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/design_system/components/pf_mark.dart';
+import '../../core/design_system/tokens/pf_type.dart';
 import '../../core/theme/app_colors.dart';
 
 /// Splash mínimo — sin flutter_animate (evita jank en web al boot).
@@ -19,7 +21,7 @@ class SplashScreen extends StatelessWidget {
 
     return const Scaffold(
       body: ColoredBox(
-        color: Color(0xFF0C0F14),
+        color: AppColors.darkBackground,
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -28,12 +30,7 @@ class SplashScreen extends StatelessWidget {
               Gap(20),
               Text(
                 AppConstants.appName,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
+                style: PfType.wordmarkOnDark,
               ),
               Gap(16),
               SizedBox(
@@ -64,8 +61,7 @@ class _LogoMark extends StatelessWidget {
         shape: BoxShape.circle,
         gradient: AppColors.primaryGradient,
       ),
-      child: const Icon(
-        Icons.pets_rounded,
+      child: const PfMark(
         size: 36,
         color: Colors.white,
       ),

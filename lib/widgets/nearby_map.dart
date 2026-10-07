@@ -3,10 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../core/config/app_config.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
 import '../services/location_service.dart';
 import '../services/user_service.dart';
+
+String tileUrlFor(bool isDark) {
+  final custom = isDark ? AppConfig.mapTileUrlDark : AppConfig.mapTileUrl;
+  if (custom.isNotEmpty) return custom;
+  return isDark
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+}
 
 /// Mapa Nearby: radio, yo (approx) y gente cerca (fuzzed).
 ///
@@ -130,9 +139,7 @@ class _NearbyMapViewState extends State<NearbyMapView> {
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: isDark
-                        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-                        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+                    urlTemplate: tileUrlFor(isDark),
                     subdomains: const ['a', 'b', 'c', 'd'],
                     userAgentPackageName: 'com.picaflor.app.picaflorapp',
                     maxNativeZoom: 18,
@@ -160,11 +167,11 @@ class _NearbyMapViewState extends State<NearbyMapView> {
                   MarkerLayer(
                     markers: [
                       for (final p in people)
-                        if (p.user.hasLocation)
+                        if (p.mapLatitude != null && p.mapLongitude != null)
                           Marker(
                             point: LatLng(
-                              p.user.latitude!,
-                              p.user.longitude!,
+                              p.mapLatitude!,
+                              p.mapLongitude!,
                             ),
                             // Hit target generoso; label flota sin mover el pin.
                             width: 56,
@@ -216,16 +223,39 @@ class _NearbyMapViewState extends State<NearbyMapView> {
                 decoration: BoxDecoration(
                   color: (isDark ? Colors.black : Colors.white)
                       .withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                 ),
                 child: Text(
                   isDark ? '© OSM · © CARTO' : '© OpenStreetMap',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontSize: 9,
                         color: isDark
                             ? AppColors.darkTextTertiary
                             : AppColors.lightTextTertiary,
                       ),
+                ),
+              ),
+            ),
+
+            Positioned(
+              right: 8,
+              bottom: 6,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: (isDark ? AppColors.darkSurface : AppColors.lightSurface)
+                        .withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    child: Text(
+                      '© OpenStreetMap © CARTO',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -406,7 +436,6 @@ class _PersonPinState extends State<_PersonPin> {
                         label,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
                           fontWeight: FontWeight.w700,
                           height: 1,
                           letterSpacing: 0.2,
@@ -444,7 +473,7 @@ class _PersonPinState extends State<_PersonPin> {
                     ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.74),
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.18),
@@ -457,7 +486,6 @@ class _PersonPinState extends State<_PersonPin> {
                       widget.displayName.split(' ').first,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                         height: 1.1,
                       ),
@@ -506,7 +534,6 @@ class _PrivacyChip extends StatelessWidget {
             'Zona aproximada',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  fontSize: 11,
                   letterSpacing: 0.05,
                 ),
           ),

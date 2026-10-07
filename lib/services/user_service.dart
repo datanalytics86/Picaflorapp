@@ -172,10 +172,26 @@ class NearbyUser {
   const NearbyUser({
     required this.user,
     required this.distanceMeters,
+    this.distanceBucket,
+    this.activityBucket,
+    this.displayLatitude,
+    this.displayLongitude,
   });
 
   final UserModel user;
   final double distanceMeters;
+  final String? distanceBucket;
+  final String? activityBucket;
+
+  /// Coordenada solo para dibujar el pin. No es la ubicación de la persona.
+  final double? displayLatitude;
+  final double? displayLongitude;
+
+  bool get hasMapPoint =>
+      (displayLatitude != null && displayLongitude != null) || user.hasLocation;
+
+  double? get mapLatitude => displayLatitude ?? user.latitude;
+  double? get mapLongitude => displayLongitude ?? user.longitude;
 
   String get distanceLabel =>
       LocationPrivacy.formatApproxDistance(distanceMeters);

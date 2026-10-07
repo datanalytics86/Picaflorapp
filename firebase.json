@@ -6,6 +6,37 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "src/**/*.test.ts"
+      ]
+    }
+  ],
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "storage": {
+      "port": 9199
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  },
   "hosting": {
     "public": "build/web",
     "ignore": [
@@ -21,6 +52,10 @@
       {
         "source": "/privacidad/**",
         "destination": "/privacidad.html"
+      },
+      {
+        "source": "/eliminar-cuenta",
+        "destination": "/eliminar-cuenta.html"
       },
       {
         "source": "**",

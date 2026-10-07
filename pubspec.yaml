@@ -14,7 +14,6 @@ dependencies:
 
   # State management
   flutter_riverpod: ^2.5.1
-  riverpod_annotation: ^2.3.5
 
   # Navigation
   go_router: ^14.2.0
@@ -23,41 +22,46 @@ dependencies:
   firebase_core: ^3.3.0
   firebase_auth: ^5.1.2
   cloud_firestore: ^5.2.0
-  firebase_storage: ^12.1.1
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^6.1.1
   crypto: ^3.0.3
 
   # Location
   geolocator: ^12.0.0
-  permission_handler: ^11.3.1
 
   # Map (OSM tiles, sin API key)
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
   # UI / UX
-  google_fonts: ^6.2.1
-  cached_network_image: ^3.3.1
   shimmer: ^3.0.0
-  flutter_animate: ^4.5.0
   gap: ^3.0.1
   intl: ^0.20.2
+  url_launcher: ^6.3.1
+  package_info_plus: ^8.1.1
+  cloud_functions: ^5.2.0
 
   # Utils
   shared_preferences: ^2.2.3
-  uuid: ^4.4.0
   equatable: ^2.0.5
-  collection: ^1.18.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-  riverpod_generator: ^2.4.0
-  build_runner: ^2.4.11
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

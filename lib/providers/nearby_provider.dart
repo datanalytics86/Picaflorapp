@@ -3,27 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
 import '../core/constants/santiago_bounds.dart';
+import '../core/privacy/nearby_policy.dart';
 import '../core/utils/location_privacy.dart';
 import '../data/demo_nearby.dart';
+import '../features/safety/safety_controller.dart';
 import '../services/user_service.dart';
 import 'auth_provider.dart';
 import 'location_provider.dart';
 import 'user_provider.dart';
 
-/// Resultado de Nearby: gente real o demo de respaldo.
-class NearbyResult {
-  const NearbyResult({
-    required this.people,
-    this.isDemo = false,
-    this.error,
-  });
-
-  final List<NearbyUser> people;
-  final bool isDemo;
-  final String? error;
-
-  bool get isEmpty => people.isEmpty;
-}
+export '../core/privacy/nearby_policy.dart' show NearbyResult;
 
 /// Personas cercanas.
 ///
@@ -44,11 +33,13 @@ final nearbyUsersProvider = Provider.autoDispose<AsyncValue<NearbyResult>>((ref)
     final radius = ref.watch(
       locationControllerProvider.select((s) => s.radiusMeters),
     );
-    final uid = ref.watch(authServiceProvider).currentUid ?? 'local';
+    final uid = ref.watch(sessionProvider.select((s) => s?.uid)) ?? 'local';
+    final blocked = ref.watch(safetyControllerProvider).blocked;
 
     final people = DemoNearby.people(originLat: lat, originLon: lon)
         .where((p) => p.user.uid != uid)
         .where((p) => p.distanceMeters <= radius)
+        .where((p) => !blocked.contains(p.user.uid))
         .toList(growable: false);
 
     if (kDebugMode) {
@@ -78,49 +69,40 @@ final _nearbyUsersRemoteProvider =
   final radius = ref.watch(
     locationControllerProvider.select((s) => s.radiusMeters),
   );
-  final uid = ref.watch(authServiceProvider).currentUid ?? 'local';
+  final uid = ref.watch(sessionProvider.select((s) => s?.uid)) ?? 'local';
+  final blocked = ref.watch(safetyControllerProvider).blocked;
   final hasLocation = ref.watch(
     locationControllerProvider.select((s) => s.hasLocation),
   );
 
-  if (!hasLocation) {
-    return NearbyResult(
-      people: DemoNearby.people(originLat: lat, originLon: lon)
-          .where((p) => p.distanceMeters <= radius)
-          .toList(growable: false),
-      isDemo: true,
-    );
-  }
-
-  try {
-    final people = await ref
-        .read(userServiceProvider)
-        .getNearbyUsers(
-          currentUid: uid,
-          latitude: lat,
-          longitude: lon,
-          radiusMeters: radius,
-        )
-        .timeout(const Duration(seconds: 8));
-
-    if (people.isEmpty) {
-      final demo = DemoNearby.people(originLat: lat, originLon: lon)
-          .where((p) => p.distanceMeters <= radius)
+  List<NearbyUser> remote = const [];
+  var failed = false;
+  if (hasLocation) {
+    try {
+      remote = await ref
+          .read(userServiceProvider)
+          .getNearbyUsers(
+            currentUid: uid,
+            latitude: lat,
+            longitude: lon,
+            radiusMeters: radius,
+          )
+          .timeout(const Duration(seconds: 8));
+      remote = remote
+          .where((p) => !blocked.contains(p.user.uid))
           .toList(growable: false);
-      return NearbyResult(people: demo, isDemo: true);
+    } catch (_) {
+      failed = true;
     }
-
-    return NearbyResult(people: people, isDemo: false);
-  } catch (_) {
-    final demo = DemoNearby.people(originLat: lat, originLon: lon)
-        .where((p) => p.distanceMeters <= radius)
-        .toList(growable: false);
-    return NearbyResult(
-      people: demo,
-      isDemo: true,
-      error: 'Mostrando ejemplos. Revisa tu conexión.',
-    );
   }
+
+  return NearbyPolicy.resolve(
+    demoMode: false,
+    hasLocation: hasLocation,
+    failed: failed,
+    remote: remote,
+    demoPeople: const [],
+  );
 });
 
 String nearbyDistanceLabel(double meters) =>
