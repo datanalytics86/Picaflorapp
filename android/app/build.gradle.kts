@@ -52,11 +52,8 @@ android {
 
     buildTypes {
         release {
-            // Si existe android/key.properties → firma release; si no, debug (CI / demo).
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
             }
             isMinifyEnabled = true
             isShrinkResources = true
@@ -71,6 +68,17 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+tasks.configureEach {
+    if (name.contains("Release") && !keystorePropertiesFile.exists()) {
+        doFirst {
+            throw GradleException(
+                "Release sin keystore está prohibido. Crea android/key.properties " +
+                    "(ver key.properties.example). CI publica el build web en modo demo.",
+            )
+        }
     }
 }
 

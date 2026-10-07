@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/config/app_config.dart';
+import '../core/design_system/tokens/pf_type.dart';
 import '../core/theme/app_colors.dart';
 
 /// Avatar premium — iniciales con gradiente, anillo sutil, presencia discreta.
@@ -163,7 +164,7 @@ class _Initials extends StatelessWidget {
   Widget build(BuildContext context) {
     final start = useBrandGradient ? AppColors.primary : baseColor;
     final end = useBrandGradient
-        ? const Color(0xFF2BB8A9)
+        ? AppColors.primaryDark
         : AppColors.avatarColorDark(baseColor);
 
     return Container(
@@ -179,13 +180,7 @@ class _Initials extends StatelessWidget {
       ),
       child: Text(
         initials,
-        style: TextStyle(
-          fontSize: size * 0.34,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
-          height: 1,
-          letterSpacing: 0.25,
-        ),
+        style: PfType.avatarInitials(size, AppColors.onBrandLight),
       ),
     );
   }

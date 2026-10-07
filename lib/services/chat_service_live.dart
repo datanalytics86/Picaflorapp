@@ -63,10 +63,6 @@ Stream<ChatModel?> watchChat(String chatId) {
 }
 
 Stream<List<MessageModel>> watchMessages(String chatId, {int limit = 80}) {
-  if (chatId.contains('demo_')) {
-    return Stream.value(const []);
-  }
-
   return _messages(chatId)
       .orderBy('createdAt', descending: true)
       .limit(limit)
@@ -87,6 +83,9 @@ Future<MessageModel> sendTextMessage({
   required String text,
   required String otherUid,
 }) async {
+  if (otherUid.isEmpty) {
+    throw ChatException('No se pudo enviar el mensaje. Inténtalo de nuevo.');
+  }
   final msgRef = _messages(chatId).doc();
   final message = MessageModel(
     id: msgRef.id,
@@ -96,27 +95,12 @@ Future<MessageModel> sendTextMessage({
   );
 
   try {
-    final batch = _db.batch();
-    batch.set(msgRef, {
+    // Solo el mensaje. El trigger onMessageCreated actualiza el chat
+    // (lastMessage, no leídos). El cliente no puede reescribir participantIds.
+    await msgRef.set({
       ...message.toCreateMap(),
       'createdAt': FieldValue.serverTimestamp(),
     });
-    batch.set(
-      _chats.doc(chatId),
-      {
-        'participantIds': [senderId, otherUid]..sort(),
-        'lastMessage': text,
-        'lastMessageSenderId': senderId,
-        'lastMessageAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'unreadCount': {
-          otherUid: FieldValue.increment(1),
-          senderId: 0,
-        },
-      },
-      SetOptions(merge: true),
-    );
-    await batch.commit();
     return message.copyWith(createdAt: DateTime.now());
   } catch (e) {
     debugPrint('sendTextMessage error: $e');
@@ -129,13 +113,31 @@ Future<void> markChatAsRead({
   required String uid,
 }) async {
   try {
-    await _chats.doc(chatId).set({
-      'unreadCount': {uid: 0},
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    // Ruta punteada: si se manda el mapa entero, las reglas rechazan
+    // el update porque borraría la clave de la otra persona.
+    await _chats.doc(chatId).update({
+      FieldPath(['unreadCount', uid]): 0,
+      FieldPath(['lastRead', uid]): FieldValue.serverTimestamp(),
+    });
   } catch (e) {
     debugPrint('markChatAsRead error: $e');
   }
+}
+
+Future<List<MessageModel>> fetchOlderMessages({
+  required String chatId,
+  required DateTime before,
+  int limit = 40,
+}) async {
+  final snap = await _messages(chatId)
+      .orderBy('createdAt', descending: true)
+      .startAfter([Timestamp.fromDate(before)])
+      .limit(limit)
+      .get();
+  final list = snap.docs
+      .map((d) => MessageModel.fromMap(d.data(), id: d.id, chatId: chatId))
+      .toList();
+  return list.reversed.toList();
 }
 
 Future<ChatModel?> getChat(String chatId) async {

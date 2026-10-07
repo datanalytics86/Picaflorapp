@@ -10,8 +10,6 @@
 	<string>Picaflor</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Picaflor usa tu zona aproximada para mostrarte gente cerca en Santiago.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Picaflor usa tu zona aproximada para mostrarte gente cerca en Santiago.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

@@ -1,21 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/privacy/buckets.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
 import '../../core/utils/time_ago.dart';
-import '../../data/demo_nearby.dart';
-import '../../data/demo_store.dart';
+import '../../features/safety/safety_controller.dart';
 import '../../models/message_model.dart';
-import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/user_provider.dart';
+import '../../services/chat_service.dart';
 import '../../widgets/chat_bubble.dart';
 import '../../widgets/message_input.dart';
 import '../../widgets/picaflor_avatar.dart';
+import '../../widgets/public_profile_sheet.dart';
 
 /// Conversación 1:1 — sin loops de markAsRead (freeze fix).
 class ChatScreen extends ConsumerStatefulWidget {
@@ -34,7 +38,11 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
-  bool _didMarkRead = false;
+  Timer? _readDebounce;
+  String? _lastMarkedMessageId;
+  final List<MessageModel> _older = [];
+  bool _loadingOlder = false;
+  bool _noMoreOlder = false;
 
   @override
   void initState() {
@@ -48,32 +56,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _readDebounce?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
 
   void _markReadOnce() {
-    if (_didMarkRead) return;
-    _didMarkRead = true;
     final uid = ref.read(authServiceProvider).currentUid;
     if (uid == null || widget.chatId.isEmpty) return;
-    // Fire-and-forget, sin await en el frame.
     ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
   }
 
-  UserModel? _resolveOther(String uid) {
-    if (uid.isEmpty) return null;
-    // Sync: DemoStore primero (sin StreamProvider que se quede loading).
-    final fromStore = DemoStore.instance.usersSnapshot[uid];
-    if (fromStore != null) return fromStore;
-    if (!uid.startsWith('demo_')) return null;
-    for (final d in DemoNearby.people(
-      originLat: -33.4489,
-      originLon: -70.6693,
-    )) {
-      if (d.user.uid == uid) return d.user;
-    }
-    return null;
+  void _scheduleMarkRead(List<MessageModel> messages, String myUid) {
+    if (messages.isEmpty || myUid.isEmpty) return;
+    final incoming = messages.last;
+    if (incoming.senderId == myUid) return;
+    if (incoming.id.isEmpty || incoming.id == _lastMarkedMessageId) return;
+    _readDebounce?.cancel();
+    _readDebounce = Timer(const Duration(milliseconds: 350), () {
+      _lastMarkedMessageId = incoming.id;
+      ref.read(chatControllerProvider.notifier).markAsRead(widget.chatId);
+    });
   }
 
   Future<bool> _send(String text, String otherUid) async {
@@ -94,6 +97,78 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
     return ok;
+  }
+
+  Future<void> _loadOlder(List<MessageModel> visible) async {
+    if (_loadingOlder || _noMoreOlder || visible.isEmpty) return;
+    final before = visible.first.createdAt;
+    if (before == null) return;
+    setState(() => _loadingOlder = true);
+    try {
+      final fetched = await ref.read(chatServiceProvider).fetchOlderMessages(
+            chatId: widget.chatId,
+            before: before,
+          );
+      if (!mounted) return;
+      final known = visible.map((m) => m.id).toSet();
+      final fresh = fetched.where((m) => !known.contains(m.id)).toList();
+      setState(() {
+        _loadingOlder = false;
+        if (fresh.isEmpty) {
+          _noMoreOlder = true;
+        } else {
+          _older.insertAll(0, fresh);
+        }
+      });
+    } on ChatException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingOlder = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingOlder = false);
+    }
+  }
+
+  List<MessageModel> _merged(List<MessageModel> live) {
+    if (_older.isEmpty) return live;
+    final seen = <String>{};
+    final all = <MessageModel>[..._older, ...live];
+    all.sort((a, b) {
+      final at = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bt = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return at.compareTo(bt);
+    });
+    return [
+      for (final message in all)
+        if (seen.add(message.id)) message,
+    ];
+  }
+
+  Future<void> _onChatMenu(String value, String otherUid) async {
+    if (otherUid.isEmpty) return;
+    if (value == 'profile') {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (_) => PublicProfileSheet(uid: otherUid),
+      );
+      return;
+    }
+    if (value == 'block') {
+      await ref.read(safetyControllerProvider).block(otherUid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bloqueaste a esta persona.')),
+      );
+      context.pop();
+      return;
+    }
+    if (value == 'report') {
+      await promptReport(context, ref, otherUid);
+    }
   }
 
   void _scrollToEnd({bool jump = false}) {
@@ -127,20 +202,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         chatAsync.valueOrNull?.otherParticipantId(myUid) ??
         '';
 
-    final other = _resolveOther(resolvedOtherUid);
+    final other = ref.watch(userByIdProvider(resolvedOtherUid)).valueOrNull;
     final isDemo = resolvedOtherUid.startsWith('demo_');
 
-    // Solo scroll cuando llegan mensajes nuevos — SIN markAsRead aquí.
     ref.listen(chatMessagesProvider(widget.chatId), (prev, next) {
       final prevLen = prev?.valueOrNull?.length ?? 0;
-      final nextLen = next.valueOrNull?.length ?? 0;
+      final nextList = next.valueOrNull;
+      final nextLen = nextList?.length ?? 0;
       if (nextLen > prevLen) {
         _scrollToEnd();
+        if (nextList != null) _scheduleMarkRead(nextList, myUid);
       }
     });
 
-    final messages = messagesAsync.valueOrNull ??
-        DemoStore.instance.messagesSnapshot(widget.chatId);
+    final messages = _merged(
+      messagesAsync.valueOrNull ?? const <MessageModel>[],
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -173,10 +250,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Text(
                     isDemo
                         ? 'Perfil de ejemplo'
-                        : TimeAgo.lastSeen(
-                            other?.lastSeen,
-                            isOnline: other?.isOnline ?? false,
-                          ),
+                        : (other?.activityBucket != null
+                            ? ActivityBuckets.label(other!.activityBucket!)
+                            : TimeAgo.lastSeen(
+                                other?.lastSeen,
+                                isOnline: false,
+                              )),
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: (other?.isOnline ?? false) && !isDemo
                           ? AppColors.online
@@ -190,6 +269,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ],
         ),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Más opciones',
+            onSelected: (value) => _onChatMenu(value, resolvedOtherUid),
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'profile', child: Text('Ver perfil')),
+              PopupMenuItem(value: 'block', child: Text('Bloquear')),
+              PopupMenuItem(value: 'report', child: Text('Reportar')),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -270,14 +360,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           AppLayout.pageX(context).clamp(16, 28),
                           AppSpacing.sm,
                         ),
-                        itemCount: messages.length,
+                        itemCount: messages.length + 1,
                         itemBuilder: (context, index) {
-                          final msg = messages[index];
-                          final prev = index > 0 ? messages[index - 1] : null;
+                          if (index == 0) {
+                            return TextButton(
+                              onPressed: _loadingOlder || _noMoreOlder
+                                  ? null
+                                  : () => _loadOlder(messages),
+                              child: Text(
+                                _noMoreOlder
+                                    ? 'No hay mensajes más antiguos'
+                                    : (_loadingOlder
+                                        ? 'Cargando…'
+                                        : 'Mensajes anteriores'),
+                              ),
+                            );
+                          }
+                          final msgIndex = index - 1;
+                          final msg = messages[msgIndex];
+                          final prev = msgIndex > 0 ? messages[msgIndex - 1] : null;
                           final showDay = _shouldShowDay(prev, msg);
                           final isMine = msg.isMine(myUid);
-                          final showTail = index == messages.length - 1 ||
-                              messages[index + 1].senderId != msg.senderId;
+                          final showTail = msgIndex == messages.length - 1 ||
+                              messages[msgIndex + 1].senderId != msg.senderId;
 
                           return Column(
                             children: [

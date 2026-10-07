@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/config/app_config.dart';
+import 'core/prefs/key_value_store.dart';
+import 'core/privacy/nearby_policy.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'data/demo_store.dart';
@@ -28,6 +30,8 @@ Future<void> main() async {
   if (!kIsWeb) {
     unawaited(_safeSystemChrome());
   }
+
+  DemoGuard.assertSafe(flavor: AppConfig.flavor, demoMode: AppConfig.demoMode);
 
   final prefs = await _loadPrefsFast();
 
@@ -120,26 +124,15 @@ Future<void> _safeSystemChrome() async {
   }
 }
 
-Future<SharedPreferences> _loadPrefsFast() async {
+Future<KeyValueStore> _loadPrefsFast() async {
   try {
-    return await SharedPreferences.getInstance()
+    final prefs = await SharedPreferences.getInstance()
         .timeout(const Duration(milliseconds: 500));
+    return SharedPrefsStore(prefs);
   } catch (e) {
     debugPrint('prefs timeout: $e');
-    try {
-      // ignore: invalid_use_of_visible_for_testing_member
-      SharedPreferences.setMockInitialValues({
-        AppConstants.keyOnboardingDone: true,
-      });
-      return await SharedPreferences.getInstance()
-          .timeout(const Duration(milliseconds: 300));
-    } catch (e2) {
-      // ignore: invalid_use_of_visible_for_testing_member
-      SharedPreferences.setMockInitialValues({
-        AppConstants.keyOnboardingDone: true,
-      });
-      return SharedPreferences.getInstance();
-    }
+    // Memoria vacía: no se marca el onboarding como hecho.
+    return MemoryKeyValueStore();
   }
 }
 
@@ -169,9 +162,7 @@ class _PicaflorAppState extends ConsumerState<PicaflorApp> {
         if (!mounted) return;
         ref.read(sessionProvider.notifier).sync();
         if (kDebugMode) {
-          debugPrint(
-            '🐦 session sync → ${ref.read(sessionProvider)?.uid}',
-          );
+          debugPrint('session sync');
         }
       });
     }
@@ -200,18 +191,7 @@ class _PicaflorAppState extends ConsumerState<PicaflorApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      builder: (context, child) {
-        final media = MediaQuery.of(context);
-        return MediaQuery(
-          data: media.copyWith(
-            textScaler: media.textScaler.clamp(
-              minScaleFactor: 0.9,
-              maxScaleFactor: 1.15,
-            ),
-          ),
-          child: child ?? const SizedBox.shrink(),
-        );
-      },
+      builder: (context, child) => child ?? const SizedBox.shrink(),
     );
   }
 }

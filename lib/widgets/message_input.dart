@@ -81,7 +81,7 @@ class _MessageInputState extends State<MessageInput> {
                     color: isDark
                         ? AppColors.darkSurfaceElevated
                         : AppColors.lightBackground,
-                    borderRadius: BorderRadius.circular(24),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
                     border: Border.all(
                       color: isDark
                           ? AppColors.darkBorder
@@ -121,10 +121,10 @@ class _MessageInputState extends State<MessageInput> {
                       : (isDark
                           ? AppColors.darkSurfaceElevated
                           : AppColors.lightBorder),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
                   child: InkWell(
                     onTap: _hasText && !widget.isSending ? _submit : null,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
                     child: Center(
                       child: widget.isSending
                           ? const SizedBox(

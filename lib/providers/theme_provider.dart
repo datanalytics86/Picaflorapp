@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/app_constants.dart';
+import '../core/prefs/key_value_store.dart';
 
-final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
+final sharedPreferencesProvider = Provider<KeyValueStore>((ref) {
   throw UnimplementedError(
     'sharedPreferencesProvider debe sobreescribirse en main()',
   );
@@ -14,9 +14,9 @@ final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
   ThemeModeNotifier(this._prefs) : super(_read(_prefs));
 
-  final SharedPreferences _prefs;
+  final KeyValueStore _prefs;
 
-  static ThemeMode _read(SharedPreferences prefs) {
+  static ThemeMode _read(KeyValueStore prefs) {
     final raw = prefs.getString(AppConstants.keyThemeMode);
     switch (raw) {
       case 'light':
@@ -57,7 +57,7 @@ class OnboardingNotifier extends StateNotifier<bool> {
   OnboardingNotifier(this._prefs)
       : super(_prefs.getBool(AppConstants.keyOnboardingDone) ?? false);
 
-  final SharedPreferences _prefs;
+  final KeyValueStore _prefs;
 
   Future<void> complete() async {
     state = true;

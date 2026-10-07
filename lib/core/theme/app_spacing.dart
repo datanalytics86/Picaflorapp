@@ -21,10 +21,10 @@ abstract final class AppSpacing {
   static const double sectionY = 16;
   static const double listGap = 12;
 
-  static const double radiusSm = 10;
-  static const double radiusMd = 14;
-  static const double radiusLg = 18;
-  static const double radiusXl = 22;
+  static const double radiusSm = 8;
+  static const double radiusMd = 12;
+  static const double radiusLg = 16;
+  static const double radiusXl = 24;
   static const double radiusXxl = 28;
   static const double radiusPill = 999;
 
@@ -153,7 +153,7 @@ abstract final class AppShadows {
     if (web) {
       return [
         BoxShadow(
-          color: const Color(0xFF0C0F14).withValues(alpha: 0.045),
+          color: AppColors.inkShadow.withValues(alpha: 0.045),
           blurRadius: 16,
           offset: const Offset(0, 4),
           spreadRadius: -2,
@@ -162,18 +162,18 @@ abstract final class AppShadows {
     }
     return [
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.025),
+        color: AppColors.inkShadow.withValues(alpha: 0.025),
         blurRadius: 2,
         offset: const Offset(0, 1),
       ),
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.045),
+        color: AppColors.inkShadow.withValues(alpha: 0.045),
         blurRadius: 14,
         offset: const Offset(0, 5),
         spreadRadius: -3,
       ),
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.03),
+        color: AppColors.inkShadow.withValues(alpha: 0.03),
         blurRadius: 28,
         offset: const Offset(0, 12),
         spreadRadius: -8,
@@ -194,7 +194,7 @@ abstract final class AppShadows {
     }
     return [
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.04),
+        color: AppColors.inkShadow.withValues(alpha: 0.04),
         blurRadius: 4,
         offset: const Offset(0, 2),
       ),
@@ -220,7 +220,7 @@ abstract final class AppShadows {
     }
     return [
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.04),
+        color: AppColors.inkShadow.withValues(alpha: 0.04),
         blurRadius: 6,
         offset: const Offset(0, 2),
       ),
@@ -262,7 +262,7 @@ abstract final class AppShadows {
     }
     return [
       BoxShadow(
-        color: const Color(0xFF0C0F14).withValues(alpha: 0.06),
+        color: AppColors.inkShadow.withValues(alpha: 0.06),
         blurRadius: 14,
         offset: const Offset(0, 4),
         spreadRadius: -2,

@@ -40,12 +40,9 @@ class ChatService {
       );
     }
 
-    if (otherUid.startsWith('demo_')) {
-      return ChatModel(
-        id: ChatModel.chatIdFor(currentUid, otherUid),
-        participantIds: [currentUid, otherUid]..sort(),
-        lastMessage: null,
-        createdAt: DateTime.now(),
+    if (otherUid.startsWith('demo_') || currentUid.startsWith('demo_')) {
+      throw ChatException(
+        'Este perfil es de ejemplo y no existe en producción.',
       );
     }
 
@@ -94,6 +91,27 @@ class ChatService {
     });
   }
 
+  Future<List<MessageModel>> fetchOlderMessages({
+    required String chatId,
+    required DateTime before,
+    int limit = 40,
+  }) async {
+    if (_isDemo) {
+      final all = DemoStore.instance.messagesSnapshot(chatId);
+      final older = all
+          .where((m) => m.createdAt != null && m.createdAt!.isBefore(before))
+          .toList();
+      if (older.length <= limit) return older;
+      return older.sublist(older.length - limit);
+    }
+    await _ensureLive();
+    return live.fetchOlderMessages(
+      chatId: chatId,
+      before: before,
+      limit: limit,
+    );
+  }
+
   Stream<List<MessageModel>> watchMessages(String chatId, {int limit = 80}) {
     if (chatId.isEmpty) return Stream.value(const []);
     if (_isDemo) return DemoStore.instance.watchMessages(chatId);
@@ -135,7 +153,7 @@ class ChatService {
 
     if (otherUid.startsWith('demo_') || chatId.contains('demo_')) {
       throw ChatException(
-        'Este perfil es de ejemplo. Cuando haya gente real, el chat funciona altiro.',
+        'Este perfil es de ejemplo y no existe en producción.',
       );
     }
 
@@ -156,7 +174,9 @@ class ChatService {
       await DemoStore.instance.markChatAsRead(chatId: chatId, uid: uid);
       return;
     }
-    if (chatId.contains('demo_')) return;
+    if (chatId.contains('demo_')) {
+      throw ChatException('Este chat de ejemplo no existe en producción.');
+    }
     await _ensureLive();
     await live.markChatAsRead(chatId: chatId, uid: uid);
   }

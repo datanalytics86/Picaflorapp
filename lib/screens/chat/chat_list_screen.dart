@@ -7,9 +7,8 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
 import '../../core/utils/time_ago.dart';
-import '../../data/demo_nearby.dart';
+import '../../features/safety/safety_controller.dart';
 import '../../models/chat_model.dart';
-import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/user_provider.dart';
@@ -17,6 +16,7 @@ import '../../router/app_router.dart';
 import '../../widgets/picaflor_avatar.dart';
 import '../../widgets/picaflor_empty_state.dart';
 import '../../widgets/picaflor_skeleton.dart';
+import '../../widgets/public_profile_sheet.dart';
 
 /// Lista de conversaciones — minimalista estilo fintech, usable en PC.
 class ChatListScreen extends ConsumerWidget {
@@ -55,7 +55,6 @@ class ChatListScreen extends ConsumerWidget {
                         style: theme.textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                           letterSpacing: -0.5,
-                          fontSize: wide ? 26 : 22,
                           height: 1.1,
                         ),
                       ),
@@ -66,7 +65,6 @@ class ChatListScreen extends ConsumerWidget {
                           color: isDark
                               ? AppColors.darkTextSecondary
                               : AppColors.lightTextSecondary,
-                          fontSize: wide ? 14 : 13,
                           height: 1.35,
                         ),
                       ),
@@ -153,18 +151,6 @@ class _ChatTile extends ConsumerStatefulWidget {
 class _ChatTileState extends ConsumerState<_ChatTile> {
   bool _hovered = false;
 
-  UserModel? _demoUser(String uid) {
-    if (!uid.startsWith('demo_')) return null;
-    final demos = DemoNearby.people(
-      originLat: -33.4489,
-      originLon: -70.6693,
-    );
-    for (final d in demos) {
-      if (d.user.uid == uid) return d.user;
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -172,7 +158,7 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
     final otherUid = widget.chat.otherParticipantId(widget.myUid);
     final otherAsync = ref.watch(userByIdProvider(otherUid));
     final unread = widget.chat.unreadFor(widget.myUid);
-    final other = otherAsync.valueOrNull ?? _demoUser(otherUid);
+    final other = otherAsync.valueOrNull;
 
     final name = other?.displayName ?? 'Usuario';
     final preview = (widget.chat.lastMessage?.isNotEmpty == true)
@@ -236,7 +222,6 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
                                       ? FontWeight.w700
                                       : FontWeight.w600,
                                   letterSpacing: -0.2,
-                                  fontSize: 15,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -254,7 +239,6 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
                                 fontWeight: unread > 0
                                     ? FontWeight.w600
                                     : FontWeight.w400,
-                                fontSize: 11.5,
                               ),
                             ),
                           ],
@@ -278,7 +262,6 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
                                   fontWeight: unread > 0
                                       ? FontWeight.w500
                                       : FontWeight.w400,
-                                  fontSize: 13.2,
                                 ),
                               ),
                             ),
@@ -302,7 +285,6 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
                                       theme.textTheme.labelSmall?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w700,
-                                    fontSize: 11,
                                   ),
                                 ),
                               ),
@@ -311,6 +293,27 @@ class _ChatTileState extends ConsumerState<_ChatTile> {
                         ),
                       ],
                     ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Más opciones',
+                    onSelected: (value) async {
+                      if (otherUid.isEmpty) return;
+                      if (value == 'block') {
+                        await ref.read(safetyControllerProvider).block(otherUid);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Bloqueaste a esta persona.'),
+                          ),
+                        );
+                      } else if (value == 'report') {
+                        await promptReport(context, ref, otherUid);
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'block', child: Text('Bloquear')),
+                      PopupMenuItem(value: 'report', child: Text('Reportar')),
+                    ],
                   ),
                 ],
               ),

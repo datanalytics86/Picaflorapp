@@ -41,11 +41,11 @@ class ChatBubble extends StatelessWidget {
         : (isDark ? AppColors.bubbleOtherDark : AppColors.bubbleOtherLight);
 
     final fg = isMine
-        ? Colors.white
+        ? (isDark ? AppColors.onBrandDark : AppColors.onBrandLight)
         : (isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary);
 
     final timeColor = isMine
-        ? Colors.white.withValues(alpha: 0.75)
+        ? fg
         : (isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary);
 
     final screenW = MediaQuery.sizeOf(context).width;
@@ -99,7 +99,6 @@ class ChatBubble extends StatelessWidget {
                 PicaflorDateUtils.timeOnly(message.createdAt),
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: timeColor,
-                  fontSize: 10,
                 ),
               ),
             ],

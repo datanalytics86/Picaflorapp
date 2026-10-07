@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/design_system/components/pf_mark.dart';
+import '../../features/safety/safety_controller.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
@@ -120,6 +123,47 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.sm),
           PicaflorSurface(
             padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.workspace_premium_outlined),
+                  title: const Text('Picaflor Plus'),
+                  subtitle: const Text(
+                    AppConfig.plusEnabled
+                        ? 'Gestionar suscripción'
+                        : 'Lista de espera · todavía no se cobra',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.push(AppRoutes.plus),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.download_outlined),
+                  title: const Text('Descargar mis datos'),
+                  subtitle: const Text(
+                    'Una copia de lo que tenemos de ti en este dispositivo o en la nube.',
+                  ),
+                  onTap: () => _exportData(context, ref),
+                ),
+                _div(isDark),
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_outlined),
+                  title: Text(
+                    'Eliminar cuenta',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: AppColors.error,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Se borra en este dispositivo y, en producción, en la nube.',
+                  ),
+                  onTap: () => _confirmDelete(context, ref),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          PicaflorSurface(
+            padding: EdgeInsets.zero,
             child: ListTile(
               leading:
                   const Icon(Icons.logout_rounded, color: AppColors.error),
@@ -175,8 +219,7 @@ class SettingsScreen extends ConsumerWidget {
                         borderRadius:
                             BorderRadius.circular(AppSpacing.radiusSm + 2),
                       ),
-                      child: const Icon(
-                        Icons.pets_rounded,
+                      child: const PfMark(
                         color: Colors.white,
                         size: 22,
                       ),
@@ -191,8 +234,7 @@ class SettingsScreen extends ConsumerWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        Text('Versión 1.0.0',
-                            style: theme.textTheme.bodySmall),
+                        const _VersionLabel(),
                       ],
                     ),
                   ],
@@ -245,19 +287,8 @@ class SettingsScreen extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  trailing: const Icon(Icons.copy_rounded, size: 18),
-                  onTap: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: AppConfig.privacyPolicyUrl),
-                    );
-                    await Haptic.light();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Link de privacidad copiado'),
-                      ),
-                    );
-                  },
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => _openExternal(AppConfig.privacyPolicyUrl),
                 ),
                 _div(isDark),
                 ListTile(
@@ -268,34 +299,16 @@ class SettingsScreen extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  trailing: const Icon(Icons.copy_rounded, size: 18),
-                  onTap: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: AppConfig.termsUrl),
-                    );
-                    await Haptic.light();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link de términos copiado')),
-                    );
-                  },
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => _openExternal(AppConfig.termsUrl),
                 ),
                 _div(isDark),
                 ListTile(
                   leading: const Icon(Icons.mail_outline_rounded),
                   title: const Text('Soporte'),
                   subtitle: const Text(AppConfig.supportEmail),
-                  trailing: const Icon(Icons.copy_rounded, size: 18),
-                  onTap: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: AppConfig.supportEmail),
-                    );
-                    await Haptic.light();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Email copiado')),
-                    );
-                  },
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => _openExternal('mailto:${AppConfig.supportEmail}'),
                 ),
               ],
             ),
@@ -367,4 +380,101 @@ class _ThemeOption extends StatelessWidget {
           : null,
     );
   }
+}
+
+class _VersionLabel extends StatelessWidget {
+  const _VersionLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snap) {
+        final version = snap.data?.version;
+        return Text(
+          version == null ? 'Versión' : 'Versión $version',
+          style: Theme.of(context).textTheme.bodySmall,
+        );
+      },
+    );
+  }
+}
+
+Future<void> _openExternal(String url) async {
+  final uri = Uri.parse(url);
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    await launchUrl(uri);
+  }
+}
+
+Future<void> _exportData(BuildContext context, WidgetRef ref) async {
+  try {
+    final data = await ref.read(safetyControllerProvider).exportMyData();
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Tus datos'),
+        content: SingleChildScrollView(
+          child: Text(data.toString()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  } catch (_) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No pudimos preparar la copia. Inténtalo de nuevo.')),
+    );
+  }
+}
+
+Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+  final first = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('¿Eliminar tu cuenta?'),
+      content: const Text(
+        'Se cierra tu sesión y pedimos el borrado de tus datos. '
+        'En producción el plazo es de 30 días.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Continuar'),
+        ),
+      ],
+    ),
+  );
+  if (first != true || !context.mounted) return;
+  final second = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Confirma otra vez'),
+      content: const Text('Esta acción no se puede deshacer.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Eliminar cuenta'),
+        ),
+      ],
+    ),
+  );
+  if (second != true || !context.mounted) return;
+  await ref.read(safetyControllerProvider).deleteAccount();
+  await ref.read(authControllerProvider.notifier).signOut();
+  if (context.mounted) context.go(AppRoutes.login);
 }

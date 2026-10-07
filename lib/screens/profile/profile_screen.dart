@@ -98,7 +98,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         style: theme.textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                           letterSpacing: -0.5,
-                          fontSize: wide ? 26 : 22,
                         ),
                       ),
                     ),

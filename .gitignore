@@ -34,6 +34,9 @@ keystore/
 service-account*.json
 firebase-service-account*.json
 
+# Node (Functions y tests de reglas)
+node_modules/
+
 # Coverage / tooling
 coverage/
 .firebase/

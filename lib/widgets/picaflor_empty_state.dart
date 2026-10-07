@@ -90,7 +90,6 @@ class PicaflorEmptyState extends StatelessWidget {
                         ? AppColors.darkTextSecondary
                         : AppColors.lightTextSecondary,
                     height: 1.55,
-                    fontSize: 14.5,
                   ),
                 ),
               ],

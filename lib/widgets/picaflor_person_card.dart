@@ -120,7 +120,6 @@ class _PicaflorPersonCardState extends State<PicaflorPersonCard> {
                                   user.displayName,
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w600,
-                                    fontSize: wide ? 16.5 : 15.5,
                                     letterSpacing: -0.3,
                                     height: 1.2,
                                     color: isDark
@@ -142,7 +141,6 @@ class _PicaflorPersonCardState extends State<PicaflorPersonCard> {
                               style: theme.textTheme.labelSmall?.copyWith(
                                 color: AppColors.online,
                                 fontWeight: FontWeight.w600,
-                                fontSize: 11.5,
                                 letterSpacing: 0.05,
                               ),
                             ),
@@ -152,7 +150,6 @@ class _PicaflorPersonCardState extends State<PicaflorPersonCard> {
                             Text(
                               user.bio,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                fontSize: 13.2,
                                 height: 1.42,
                                 color: isDark
                                     ? AppColors.darkTextSecondary
@@ -220,7 +217,6 @@ class _InterestTag extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 11.5,
           fontWeight: FontWeight.w500,
           height: 1.15,
           letterSpacing: 0.02,
@@ -263,7 +259,6 @@ class _DistanceChip extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              fontSize: 11,
               fontWeight: FontWeight.w600,
               height: 1.15,
               letterSpacing: -0.1,
@@ -298,10 +293,10 @@ class _ChatButton extends StatelessWidget {
     if (showLabel) {
       return Material(
         color: bg,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: InkWell(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             child: Row(
@@ -312,7 +307,6 @@ class _ChatButton extends StatelessWidget {
                 Text(
                   'Chatear',
                   style: TextStyle(
-                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.1,
                     color: fg,
@@ -329,10 +323,10 @@ class _ChatButton extends StatelessWidget {
       message: 'Chatear',
       child: Material(
         color: bg,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: InkWell(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           child: SizedBox(
             width: 44,
             height: 44,

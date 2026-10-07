@@ -10,7 +10,7 @@ import 'auth_provider.dart';
 final chatServiceProvider = Provider<ChatService>((ref) => ChatService());
 
 final userChatsProvider = StreamProvider.autoDispose<List<ChatModel>>((ref) {
-  final uid = ref.watch(authServiceProvider).currentUid;
+  final uid = ref.watch(sessionProvider.select((s) => s?.uid));
   if (uid == null) return Stream.value(const []);
   return ref.watch(chatServiceProvider).watchUserChats(uid);
 });
@@ -28,7 +28,7 @@ final chatByIdProvider =
 });
 
 final totalUnreadProvider = StreamProvider.autoDispose<int>((ref) {
-  final uid = ref.watch(authServiceProvider).currentUid;
+  final uid = ref.watch(sessionProvider.select((s) => s?.uid));
   if (uid == null) return Stream.value(0);
   return ref.watch(chatServiceProvider).watchTotalUnread(uid);
 });

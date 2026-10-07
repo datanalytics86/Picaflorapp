@@ -10,6 +10,7 @@ import '../screens/chat/chat_list_screen.dart';
 import '../screens/chat/chat_screen.dart';
 import '../screens/nearby/nearby_screen.dart';
 import '../screens/onboarding/onboarding_screen.dart';
+import '../screens/plus/plus_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/settings/settings_screen.dart';
 import '../screens/shell/main_shell.dart';
@@ -25,6 +26,7 @@ abstract final class AppRoutes {
   static const chat = '/chat/:id';
   static const profile = '/profile';
   static const settings = '/settings';
+  static const plus = '/plus';
 
   static String chatPath(String chatId, {String? otherUid}) {
     final base = '/chat/$chatId';
@@ -117,6 +119,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.login,
         name: 'login',
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.plus,
+        name: 'plus',
+        builder: (context, state) => const PlusScreen(),
       ),
 
       // Shell: Home (Nearby) · Chats · Perfil

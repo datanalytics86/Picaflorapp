@@ -10,13 +10,13 @@ Checklist para dejar la app en producción (web + Android + Firebase).
 - (iOS) Mac + Xcode + Apple Developer
 - Node.js (CLI de Firebase): `npm i -g firebase-tools`
 
-## 1. Firebase (una vez)
+## 1. Firebase (una vez, lo hace una persona)
+
+No crear el proyecto ni desplegar desde un agente sin un sí explícito. Región prevista: `southamerica-east1` (ADR 0005). Los callables exigen App Check y fallan si no está (ADR 0003).
 
 ```bash
-# Login + proyecto
 firebase login
-firebase projects:create picaflorapp   # o usa uno existente
-firebase use picaflorapp
+firebase use <proyecto-existente>
 
 # FlutterFire genera lib/firebase_options.dart + google-services.json
 dart pub global activate flutterfire_cli
@@ -35,8 +35,10 @@ En **Firebase Console**:
 Desplegar reglas e índices:
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes,storage
+firebase deploy --only firestore:rules,firestore:indexes,storage,functions
 ```
+
+Eso publica reglas y las Functions de Cerca, saludos, bloqueo, borrado, export, actividad y el webhook. No correrlo hasta tener App Check y la región confirmada.
 
 ## 2. Web (más rápido de publicar)
 
@@ -105,6 +107,9 @@ Bundle id sugerido: `com.picaflor.app` (ajustar en Xcode si difiere).
 | `PRIVACY_POLICY_URL` | `https://picaflor.app/privacidad` | Store / Ajustes |
 | `TERMS_URL` | `https://picaflor.app/terminos` | Store / Ajustes |
 | `SUPPORT_EMAIL` | `hola@picaflor.app` | Contacto |
+| `PLUS_ENABLED` | `false` | Lista de espera. No cobra |
+| `WAVES_ENABLED` | `true` | Saludo antes del chat |
+| `MAP_TILE_URL` | CARTO | Teselas. Hace falta atribución |
 
 Ejemplo:
 
@@ -119,13 +124,17 @@ flutter build web --release \
 - [ ] `flutterfire configure` → `firebase_options.dart` real  
 - [ ] `DefaultFirebaseOptions.isConfigured == true`  
 - [ ] Auth methods habilitados  
-- [ ] `firebase deploy --only firestore:rules,firestore:indexes,storage`  
+- [ ] `firebase deploy --only firestore:rules,firestore:indexes,storage,functions`  
 - [ ] Build con `DEMO_MODE=false`  
 - [ ] SHA-1 release en Firebase (Google/Phone Android)  
 - [ ] Keystore backup seguro  
 - [ ] Política de privacidad publicada  
 - [ ] Probar: login, nearby, chat, perfil, logout  
-- [ ] (Opcional) App Check / reCAPTCHA phone  
+- [ ] App Check en cada app (los callables lo exigen)
+- [ ] Data Safety: ubicación aproximada, no precisa
+- [ ] Página `/eliminar-cuenta` publicada junto al hosting
+- [ ] Texto legal revisado por un abogado (el HTML del repo es borrador)
+- [ ] Keystore de release presente. Sin `android/key.properties` el build de release aborta  
 
 ## 7. Demo vs producción
 

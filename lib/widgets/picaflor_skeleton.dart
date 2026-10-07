@@ -21,9 +21,9 @@ class PicaflorSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base =
-        isDark ? AppColors.darkSurfaceElevated : const Color(0xFFE4E7EE);
+        isDark ? AppColors.darkSurfaceElevated : AppColors.lightBorder;
     final highlight =
-        isDark ? AppColors.darkBorder : const Color(0xFFF3F4F8);
+        isDark ? AppColors.darkBorder : AppColors.lightChip;
     final px = AppLayout.pageX(context);
 
     final list = ListView.separated(
@@ -60,7 +60,7 @@ class PicaflorPersonCardSkeleton extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fill =
         isDark ? AppColors.darkCard : AppColors.lightCard;
-    final bone = isDark ? AppColors.darkBorder : const Color(0xFFD6DAE2);
+    final bone = isDark ? AppColors.darkBorder : AppColors.lightBorder;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 14, 16),
@@ -155,7 +155,7 @@ class PicaflorPersonCardSkeleton extends StatelessWidget {
             height: 44,
             decoration: BoxDecoration(
               color: bone,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
             ),
           ),
         ],
@@ -180,9 +180,9 @@ class PicaflorBoxSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base =
-        isDark ? AppColors.darkSurfaceElevated : const Color(0xFFE4E7EE);
+        isDark ? AppColors.darkSurfaceElevated : AppColors.lightBorder;
     final highlight =
-        isDark ? AppColors.darkBorder : const Color(0xFFF3F4F8);
+        isDark ? AppColors.darkBorder : AppColors.lightChip;
 
     if (AppConfig.demoMode || kIsWeb) {
       return Container(

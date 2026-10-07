@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../design_system/tokens/pf_colors.dart';
 import 'app_colors.dart';
 import 'app_spacing.dart';
 import 'app_typography.dart';
@@ -16,25 +17,28 @@ abstract final class AppTheme {
 
     final ColorScheme scheme = ColorScheme(
       brightness: brightness,
-      primary: AppColors.primary,
-      onPrimary: Colors.white,
-      primaryContainer: isDark ? const Color(0xFF0F3D38) : AppColors.primarySoft,
+      primary: isDark ? AppColors.bubbleMineDark : AppColors.primary,
+      onPrimary: isDark ? AppColors.onBrandDark : AppColors.onBrandLight,
+      primaryContainer:
+          isDark ? AppColors.primaryContainerDark : AppColors.primarySoft,
       onPrimaryContainer:
           isDark ? AppColors.primaryMuted : AppColors.primaryDark,
       secondary: AppColors.secondary,
-      onSecondary: Colors.white,
+      onSecondary: AppColors.onBrandLight,
       secondaryContainer:
-          isDark ? const Color(0xFF1E2440) : AppColors.secondarySoft,
-      onSecondaryContainer:
-          isDark ? const Color(0xFFB8C0FF) : AppColors.secondary,
+          isDark ? AppColors.secondaryContainerDark : AppColors.secondarySoft,
+      onSecondaryContainer: isDark
+          ? AppColors.onSecondaryContainerDark
+          : AppColors.secondary,
       tertiary: AppColors.accent,
-      onTertiary: Colors.white,
+      onTertiary: AppColors.onBrandLight,
       tertiaryContainer:
-          isDark ? const Color(0xFF3D1F18) : AppColors.accentSoft,
+          isDark ? AppColors.accentContainerDark : AppColors.accentSoft,
       onTertiaryContainer: AppColors.accent,
       error: AppColors.error,
-      onError: Colors.white,
-      errorContainer: isDark ? const Color(0xFF3D1515) : AppColors.errorSoft,
+      onError: AppColors.onBrandLight,
+      errorContainer:
+          isDark ? AppColors.errorContainerDark : AppColors.errorSoft,
       onErrorContainer: AppColors.error,
       surface: isDark ? AppColors.darkSurface : AppColors.lightSurface,
       onSurface:
@@ -62,6 +66,7 @@ abstract final class AppTheme {
       brightness: brightness,
       colorScheme: scheme,
       textTheme: textTheme,
+      extensions: [isDark ? PfColors.dark : PfColors.light],
       scaffoldBackgroundColor:
           isDark ? AppColors.darkBackground : AppColors.lightBackground,
       canvasColor:
@@ -146,7 +151,7 @@ abstract final class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           textStyle: AppTypography.button,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
         ),
       ),
@@ -204,7 +209,7 @@ abstract final class AppTheme {
             textTheme.labelMedium!.copyWith(color: Colors.white),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
           side: BorderSide.none,
         ),
         side: BorderSide.none,
@@ -262,7 +267,7 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 8,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         ),
         titleTextStyle: textTheme.headlineSmall,
         contentTextStyle: textTheme.bodyMedium,
@@ -287,7 +292,7 @@ abstract final class AppTheme {
             isDark ? AppColors.darkSurfaceElevated : AppColors.lightTextPrimary,
         contentTextStyle: textTheme.bodyMedium?.copyWith(color: Colors.white),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
         elevation: 4,
       ),
@@ -295,7 +300,7 @@ abstract final class AppTheme {
       listTileTheme: ListTileThemeData(
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         ),
         iconColor:
             isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
@@ -326,7 +331,7 @@ abstract final class AppTheme {
         foregroundColor: Colors.white,
         elevation: 2,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         ),
       ),
 

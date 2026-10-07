@@ -7,6 +7,9 @@ abstract final class AppConstants {
   static const String keyOnboardingDone = 'onboarding_done';
   static const String keyThemeMode = 'theme_mode';
   static const String keySearchRadius = 'search_radius_m';
+  static const String keyBirthDate = 'birth_date';
+  static const String keyTermsAccepted = 'terms_accepted';
+  static const String keyAnalyticsConsent = 'analytics_consent';
 
   // Firestore collections
   static const String usersCollection = 'users';

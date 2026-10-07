@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/privacy/age_gate.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/haptic.dart';
 import '../../providers/theme_provider.dart';
 import '../../router/app_router.dart';
 import '../../widgets/picaflor_button.dart';
+import 'age_consent_form.dart';
 
 /// Onboarding de máximo 2 pantallas — limpio y directo.
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -20,6 +23,11 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _pageController = PageController();
   int _page = 0;
+  DateTime? _birthDate;
+  bool _terms = false;
+  bool _analytics = false;
+
+  static const _stepCount = 3;
 
   static const _pages = [
     _OnboardData(
@@ -43,9 +51,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   ];
 
   Future<void> _finish() async {
+    final birth = _birthDate;
+    if (birth == null || !AgeGate.isAdult(birth, DateTime.now())) {
+      _toast('Picaflor es para mayores de 18.');
+      return;
+    }
+    if (!_terms) {
+      _toast('Acepta los términos para continuar. No vienen marcados.');
+      return;
+    }
+    final prefs = ref.read(sharedPreferencesProvider);
+    await prefs.setString(
+      AppConstants.keyBirthDate,
+      birth.toIso8601String(),
+    );
+    await prefs.setBool(AppConstants.keyTermsAccepted, true);
+    await prefs.setBool(AppConstants.keyAnalyticsConsent, _analytics);
     await Haptic.success();
     await ref.read(onboardingDoneProvider.notifier).complete();
     if (mounted) context.go(AppRoutes.login);
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   void _next() {
@@ -70,7 +100,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final isLast = _page == _pages.length - 1;
+    final isLast = _page == _stepCount - 1;
 
     return Scaffold(
       body: SafeArea(
@@ -88,7 +118,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   const Spacer(),
                   if (!isLast)
                     TextButton(
-                      onPressed: _finish,
+                      onPressed: () {
+                        _pageController.animateToPage(
+                          _stepCount - 1,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        );
+                      },
                       child: const Text('Saltar'),
                     ),
                 ],
@@ -97,9 +133,19 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
-                itemCount: _pages.length,
+                itemCount: _stepCount,
                 onPageChanged: (i) => setState(() => _page = i),
                 itemBuilder: (context, index) {
+                  if (index == 2) {
+                    return AgeConsentForm(
+                      birthDate: _birthDate,
+                      termsAccepted: _terms,
+                      analyticsAccepted: _analytics,
+                      onBirthDate: (d) => setState(() => _birthDate = d),
+                      onTerms: (v) => setState(() => _terms = v),
+                      onAnalytics: (v) => setState(() => _analytics = v),
+                    );
+                  }
                   final data = _pages[index];
                   return Padding(
                     padding: const EdgeInsets.symmetric(
@@ -161,7 +207,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(_pages.length, (i) {
+                    children: List.generate(_stepCount, (i) {
                       final active = i == _page;
                       return AnimatedContainer(
                         duration: const Duration(milliseconds: 220),

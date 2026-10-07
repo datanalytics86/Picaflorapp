@@ -1,0 +1,23 @@
+{
+  "name": "picaflor-functions",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/pure.test.ts",
+    "test:rules": "npm --prefix ../firestore-tests test"
+  },
+  "dependencies": {
+    "firebase-admin": "13.6.0",
+    "firebase-functions": "6.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.30",
+    "tsx": "4.19.3",
+    "typescript": "5.6.3"
+  }
+}

@@ -1,11 +1,12 @@
-import 'dart:math' as math;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/config/app_config.dart';
 import '../core/constants/app_constants.dart';
 import '../core/constants/santiago_bounds.dart';
-import '../core/utils/distance_utils.dart';
+import '../core/privacy/buckets.dart';
+import '../core/privacy/display_pin.dart';
 import '../models/user_model.dart';
 import 'user_service.dart';
 
@@ -15,18 +16,38 @@ FirebaseFirestore get _db => FirebaseFirestore.instance;
 CollectionReference<Map<String, dynamic>> get _users =>
     _db.collection(AppConstants.usersCollection);
 
+CollectionReference<Map<String, dynamic>> get _profiles =>
+    _db.collection('profiles');
+
+FirebaseFunctions get _fns =>
+    FirebaseFunctions.instanceFor(region: AppConfig.region);
+
+Map<String, dynamic> _asMap(Object? raw) {
+  if (raw is Map) {
+    return raw.map((key, value) => MapEntry(key.toString(), value));
+  }
+  return const {};
+}
+
 Future<void> createUser(UserModel user) async {
   await _users.doc(user.uid).set({
-    ...user.toCreateMap(),
-    'lastSeen': FieldValue.serverTimestamp(),
+    'email': user.email,
     'createdAt': FieldValue.serverTimestamp(),
     'updatedAt': FieldValue.serverTimestamp(),
+  }, SetOptions(merge: true));
+  await _profiles.doc(user.uid).set({
+    'displayName': user.displayName,
+    'bio': user.bio,
+    'interests': user.interests,
+    'photoUrl': user.photoUrl,
+    'isVisible': user.isVisible,
+    if (user.age != null) 'age': user.age,
   }, SetOptions(merge: true));
 }
 
 Future<UserModel?> getUser(String uid) async {
   try {
-    final snap = await _users.doc(uid).get();
+    final snap = await _profiles.doc(uid).get();
     if (!snap.exists || snap.data() == null) return null;
     return UserModel.fromMap(snap.data()!, uid: snap.id);
   } catch (e) {
@@ -36,7 +57,7 @@ Future<UserModel?> getUser(String uid) async {
 }
 
 Stream<UserModel?> watchUser(String uid) {
-  return _users.doc(uid).snapshots().map((snap) {
+  return _profiles.doc(uid).snapshots().map((snap) {
     if (!snap.exists || snap.data() == null) return null;
     return UserModel.fromMap(snap.data()!, uid: snap.id);
   }).handleError((e) {
@@ -67,7 +88,7 @@ Future<void> updateProfile({
   if (photoUrl != null) data['photoUrl'] = photoUrl;
   if (interests != null) data['interests'] = interests;
   if (isVisible != null) data['isVisible'] = isVisible;
-  await _users.doc(uid).set(data, SetOptions(merge: true));
+  await _profiles.doc(uid).set(data, SetOptions(merge: true));
 }
 
 Future<void> updateLocation({
@@ -75,20 +96,17 @@ Future<void> updateLocation({
   required double latitude,
   required double longitude,
 }) async {
-  await _users.doc(uid).set({
+  // La callable vuelve a difuminar y escribe solo locations/{uid}.
+  await _fns.httpsCallable('updateLocation').call({
     'latitude': latitude,
     'longitude': longitude,
-    'updatedAt': FieldValue.serverTimestamp(),
-    'lastSeen': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
+  });
 }
 
 Future<void> setOnlineStatus(String uid, bool isOnline) async {
-  await _users.doc(uid).set({
-    'isOnline': isOnline,
-    'lastSeen': FieldValue.serverTimestamp(),
-    'updatedAt': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
+  if (uid.isEmpty) return;
+  // El cliente no escribe isOnline. El servidor calcula el bucket.
+  await _fns.httpsCallable('touchActivity').call();
 }
 
 Future<List<NearbyUser>> getNearbyUsers({
@@ -98,43 +116,45 @@ Future<List<NearbyUser>> getNearbyUsers({
   double radiusMeters = SantiagoBounds.defaultSearchRadiusMeters,
   int limit = 50,
 }) async {
-  final latDelta = radiusMeters / 111320;
-  final cosLat = math.cos(latitude * math.pi / 180).abs().clamp(0.2, 1.0);
-  final lonDelta = radiusMeters / (111320 * cosLat);
-
-  final query = await _users
-      .where('isVisible', isEqualTo: true)
-      .where('latitude', isGreaterThanOrEqualTo: latitude - latDelta)
-      .where('latitude', isLessThanOrEqualTo: latitude + latDelta)
-      .limit(limit * 3)
-      .get();
+  final response = await _fns.httpsCallable('getNearby').call({
+    'radiusMeters': radiusMeters,
+  });
+  final root = _asMap(response.data);
+  final rawPeople = root['people'];
+  if (rawPeople is! List) return const [];
 
   final results = <NearbyUser>[];
-
-  for (final doc in query.docs) {
-    if (doc.id == currentUid) continue;
-    if (doc.id.startsWith('demo_')) continue;
-
-    final user = UserModel.fromMap(doc.data(), uid: doc.id);
-    if (!user.hasLocation) continue;
-    if (user.longitude! < longitude - lonDelta ||
-        user.longitude! > longitude + lonDelta) {
-      continue;
-    }
-
-    final meters = DistanceUtils.metersBetween(
-      latitude,
-      longitude,
-      user.latitude!,
-      user.longitude!,
+  for (final item in rawPeople) {
+    final row = _asMap(item);
+    final uid = row['uid'] as String? ?? '';
+    if (uid.isEmpty || uid == currentUid || uid.startsWith('demo_')) continue;
+    final bucket = row['distanceBucket'] as String? ?? DistanceBuckets.km2;
+    final activity = row['activityBucket'] as String? ?? ActivityBuckets.thisWeek;
+    final profile = await getUser(uid);
+    final user = profile ??
+        UserModel(
+          uid: uid,
+          email: '',
+          displayName: 'Persona',
+          activityBucket: activity,
+        );
+    final pin = DisplayPin.onRing(
+      originLat: latitude,
+      originLon: longitude,
+      uid: uid,
+      bucket: bucket,
     );
-
-    if (meters <= radiusMeters) {
-      results.add(NearbyUser(user: user, distanceMeters: meters));
-    }
+    results.add(
+      NearbyUser(
+        user: user.copyWith(activityBucket: activity),
+        distanceMeters: DistanceBuckets.displayMeters(bucket),
+        distanceBucket: bucket,
+        activityBucket: activity,
+        displayLatitude: pin.latitude,
+        displayLongitude: pin.longitude,
+      ),
+    );
+    if (results.length >= limit) break;
   }
-
-  results.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
-  if (results.length > limit) return results.sublist(0, limit);
   return results;
 }
