@@ -1,5 +1,7 @@
 # Instrucciones 06.10.26 — Megaprompt multi-agente · Picaflor v2
 
+> ⚠️ **Reemplazado por [`Instrucciones v2 07.10.26.md`](./Instrucciones%20v2%2007.10.26.md).** Se conserva solo como contexto histórico. Ante un conflicto, manda la v2.
+
 > **Para:** agente de código con acceso al repositorio `datanalytics86/Picaflorapp` (pensado para Grok 4.7, sirve para cualquier modelo agéntico).
 > **Objetivo:** llevar Picaflor a una app **minimalista, muy bien diseñada y funcional** (al nivel de producto de Fintual o BCI), segura, lista para las tiendas y con un modelo de monetización sano.
 > **Fecha del diagnóstico:** 06-10-2026, sobre el commit `d3b103e` (rama `claude/serene-davinci-2wiacu`).

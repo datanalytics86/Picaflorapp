@@ -1,0 +1,687 @@
+# Grafo de tareas Picaflor v2. Fuente: "Instrucciones v2 07.10.26.md".
+# Reglas:
+#  - status lo cambia SOLO el Verificador (V) a DONE. Valores: TODO | IN_PROGRESS | REVIEW | VERIFIED | DONE | BLOCKED
+#  - owns_paths son exclusivos entre tareas que corren en paralelo. touches_shared => L0 serializa el cambio.
+#  - Cada criterio de acceptance es un comando o una métrica verificable en CI.
+#  - closes referencia IDs de §2 (V-xx) y de docs/v2/AUDITORIA-07.10.26.md (FL/BE/CV/SC/MO/T1/AG/PR-xx).
+defaults:
+  max_diff_loc: 400
+  budget: { ci_attempts: 3, prompt_tokens: 200000 }
+  status: TODO
+  evidence: [ci_run_url_head_sha, verify_sh_excerpt, verifier_report]
+
+tasks:
+  # ───────────────────────── W0 · Estabilizar (1 agente, secuencial, camino crítico) ─────────────────────────
+  - id: T000
+    wave: W0
+    lane: L0
+    title: Crear v2/integration desde 155b6f6 e importar los archivos v2
+    depends_on: []
+    owns_paths: ["docs/v2/**", "AGENTS.md", "Instrucciones v2 07.10.26.md", ".github/pull_request_template.md"]
+    acceptance:
+      - "git log -1 --format=%P v2/integration contiene 155b6f6"
+      - "AGENTS.md, docs/v2/TASKS.yaml y docs/v2/AUDITORIA-07.10.26.md existen en v2/integration"
+  - id: T001
+    wave: W0
+    lane: L5
+    title: Toolchain fijado y devcontainer Linux
+    closes: [AG-02, AG-10]
+    depends_on: [T000]
+    owns_paths: [".fvmrc", ".devcontainer/**", "tool/preflight.sh"]
+    touches_shared: [".github/workflows/**"]
+    acceptance:
+      - ".fvmrc con la versión de Flutter stable verificada ese día (07-10-2026: 3.47.6)"
+      - "subosito/flutter-action usa flutter-version-file; runs-on: ubuntu-24.04 explícito; actions compatibles con Node 24 (verificar)"
+      - "tool/preflight.sh falla si uname != Linux o si alguna versión != pin"
+  - id: T002
+    wave: W0
+    lane: L0
+    title: CI verde - 5 unawaited_return_in_try_block + dart format (commits separados)
+    closes: [V-01, V-02, AG-01]
+    depends_on: [T001]
+    owns_paths: ["lib/services/auth_service_live.dart"]
+    acceptance:
+      - "flutter analyze --fatal-infos = 0 issues con el Flutter fijado"
+      - "dart format --output=none --set-exit-if-changed . = exit 0"
+      - "Run de CI verde en el head SHA de v2/integration"
+  - id: T003
+    wave: W0
+    lane: L1
+    title: Backend deployable - tsconfig.build, Node 22, predeploy, jobs backend y emuladores en CI
+    closes: [V-03, V-04, BE-01, BE-06, AG-03, AG-04, SC-06]
+    depends_on: [T001]
+    owns_paths: ["functions/package.json", "functions/package-lock.json", "functions/tsconfig*.json"]
+    touches_shared: ["firebase.json", ".github/workflows/**"]
+    acceptance:
+      - "cd functions && npm ci && npm run lint && npm run build && npm test = exit 0"
+      - "engines.node = 22 (o 24 si se verifica soporte en Cloud Functions y firebase-functions; ADR)"
+      - "firebase.json functions.predeploy incluye lint y build"
+      - "Job CI 'emulators' con Java 21 corre firestore-tests: 11/11 o más en verde"
+  - id: T004
+    wave: W0
+    lane: L5
+    title: tool/verify.sh, tool/metrics.sh y workflow baseline (d3b103e y 155b6f6 sin modificar)
+    closes: [AG-06, CV-21]
+    depends_on: [T002, T003]
+    owns_paths: ["tool/verify.sh", "tool/metrics.sh", "docs/v2/metrics.baseline.json"]
+    touches_shared: [".github/workflows/baseline.yml"]
+    acceptance:
+      - "metrics.baseline.json con: tests (n, pass), cobertura %, conteos del ratchet, bytes del bundle web gz, build de functions ok, reglas pass/fail, por SHA"
+      - "Valores de referencia esperados en 155b6f6: tests 23/0 widget; bundle ~1.052.440 B gz; AppColors fuera del DS ~376"
+  - id: T005
+    wave: W0
+    lane: L5
+    title: Gates v2 por AST con ratchet, fixtures que deben fallar, checks de tamaño de PR y rutas protegidas
+    closes: [FL-19, T1-26, AG-17, CV-10]
+    depends_on: [T004]
+    owns_paths: ["tool/gates/**"]
+    touches_shared: [".github/workflows/**", "analysis_options.yaml"]
+    acceptance:
+      - "tool/gates con package:analyzer: reglas de la §8.1 de Instrucciones v2"
+      - "tool/gates/baseline.json con los conteos actuales; CI falla si un conteo sube"
+      - "Cada regla tiene un fixture que la hace fallar (test del gate)"
+      - "CI falla si un PR > 400 LOC sin size-exception, o si mezcla rutas protegidas con código de producto"
+  - id: T006
+    wave: W0
+    lane: L0
+    title: STATUS.md, DECISIONS.md (copia de §9) y tool/report.sh
+    closes: [AG-07, AG-16, AG-18]
+    depends_on: [T004]
+    owns_paths: ["docs/v2/STATUS.md", "docs/v2/DECISIONS.md", "tool/report.sh"]
+    acceptance:
+      - "STATUS.md lista V-01..V-16, S/B/D/A de v1 y los IDs P0/P1 de la auditoría, con columnas estado|evidencia"
+      - "tool/report.sh W0 genera docs/v2/report-W0.json válido contra el esquema de §10"
+
+  # ───────────────────────── W1 · Loop central funcionando E2E ─────────────────────────
+  - id: T101
+    wave: W1
+    lane: L1
+    title: updateLocation - lecturas antes de escrituras + plausibilidad (ciudad, velocidad, celdas/día) + lastActiveAt
+    closes: [V-05, CV-01, BE-05a, SC-07]
+    depends_on: [T003]
+    owns_paths: ["functions/src/updateLocation.ts", "functions/src/pure/grid.ts", "functions/src/pure/rateLimit.ts"]
+    acceptance:
+      - "Test de integración en el emulador: 2 llamadas -> geohash escrito y luego resource-exhausted"
+      - "Coordenada fuera de una ciudad habilitada -> failed-precondition; salto > 150 km/h -> rechazo + congelamiento de 10 min; > 20 celdas/día -> rechazo"
+  - id: T102
+    wave: W1
+    lane: L1
+    title: Callable completeOnboarding - birthDate inmutable, profiles.age, consentEvents append-only
+    closes: [V-06, FL-02, BE-04, CV-02, T1-05, FL-12, BE-11]
+    depends_on: [T003]
+    owns_paths: ["functions/src/onboarding/**", "contracts/onboarding*.json"]
+    touches_shared: ["firestore.rules"]
+    acceptance:
+      - "Emulador: un adulto onboardeado y visible aparece en getNearby de otro usuario; un menor es rechazado; sin onboarding, updateLocation/getNearby/sendWave -> failed-precondition"
+      - "Reglas: el cliente no puede escribir birthDate, lastActiveAt ni consents (tests deny)"
+  - id: T103
+    wave: W1
+    lane: L4
+    title: Onboarding cliente - fix de Siguiente, links legales, router con estado del servidor, bloqueo persistente de menores
+    closes: [V-16, FL-06, CV-11, T1-04]
+    depends_on: [T102, T104]
+    owns_paths: ["lib/features/onboarding/**", "test/features/onboarding/**"]
+    touches_shared: ["lib/app/router/**"]
+    acceptance:
+      - "Widget test: recorre los 3 pasos solo con el CTA; sin edad o sin términos el CTA queda deshabilitado"
+      - "Widget test: cambio de cuenta en el mismo dispositivo exige onboarding de la cuenta nueva"
+      - "Tocar 'Términos' y 'Privacidad' llama a launchUrl con URLs del mismo dominio"
+  - id: T104
+    wave: W1
+    lane: L3
+    title: App Check en el cliente (Play Integrity / App Attest+DeviceCheck / reCAPTCHA Enterprise / debug en dev)
+    closes: [V-07, FL-01, BE-02, CV-07, SC-04]
+    depends_on: [T002]
+    owns_paths: ["lib/core/network/app_check*.dart", "lib/firebase_boot.dart"]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "Emulador de functions con enforceAppCheck: sin token -> rechazado; con debug token -> OK"
+      - "ADR 0003 corregido (requiere SDK en el cliente + registro en consola + aumento de cuota de Play Integrity)"
+  - id: T105
+    wave: W1
+    lane: L0
+    title: Tests de contrato Dart<->reglas (fixtures JSON) + alinear profiles (updatedAt/age)
+    closes: [V-08, FL-03, BE-03, CV-04]
+    depends_on: [T003]
+    owns_paths: ["contracts/**", "firestore-tests/contracts.test.ts"]
+    touches_shared: ["firestore.rules"]
+    acceptance:
+      - "Cada escritura del cliente (users, profiles, chats meta, messages) tiene un fixture allow + >= 2 deny"
+      - "El toggle 'Visible' y la edición de perfil pasan contra el emulador con el payload exacto de Dart"
+  - id: T106
+    wave: W1
+    lane: L1
+    title: Saludos backend - listener entrante + índice, respondWave con lastMessageAt, cancelWave, onWaveCreated push
+    closes: [V-09, BE-07, FL-15, CV-03, MO-01]
+    depends_on: [T102]
+    owns_paths: ["functions/src/waves/**"]
+    touches_shared: ["firestore.indexes.json"]
+    acceptance:
+      - "Emulador: sendWave -> aparece en query to==uid&&status==pending -> respondWave -> el chat aparece en watchUserChats de ambos"
+  - id: T107
+    wave: W1
+    lane: L4
+    title: Saludos UI - 'Saludos nuevos (n)' Aceptar/Ignorar, Enviados con estado, badge, mapeo de errores, auto-aceptación en demo
+    closes: [V-09, FL-04, FL-14, T1-02, MO-08]
+    depends_on: [T106]
+    owns_paths: ["lib/features/waves/**", "test/features/waves/**"]
+    acceptance:
+      - "Widget tests: lista, aceptar (navega al chat), ignorar (silencioso), cupo agotado (abre paywall con trigger=wave_limit), errores en es-CL"
+      - "Se elimina memoryWaves de prod (el estado sale del stream)"
+  - id: T108
+    wave: W1
+    lane: L1
+    title: Presencia real - sin activityBucket persistido; bucket calculado al leer; throttle
+    closes: [B4, FL-09, CV-05, SC-07]
+    depends_on: [T101]
+    owns_paths: ["functions/src/presence/**"]
+    acceptance:
+      - "Test: un perfil inactivo 8 días se muestra 'sin actividad reciente'; un usuario que abre la app a diario durante 30 días simulados sigue visible"
+  - id: T109
+    wave: W1
+    lane: L4
+    title: Borrar cuenta (cliente) - signOut solo local, sin touchActivity, manejo de errores
+    closes: [V-10, FL-05]
+    depends_on: [T104]
+    owns_paths: ["lib/features/settings/presentation/delete_account*", "lib/features/auth/data/**"]
+    acceptance:
+      - "Emulador: deleteAccount + signOut -> 0 documentos con el uid (salvo la evidencia legal declarada)"
+  - id: T110
+    wave: W1
+    lane: L4
+    title: Chat - paginación con DocumentSnapshot, markRead por último id, no leídos según lastRead (servidor), estado bloqueado
+    closes: [FL-07, FL-08, FL-16, B3]
+    depends_on: [T106]
+    owns_paths: ["lib/features/chat/**", "test/features/chat/**", "functions/src/chat/**"]
+    acceptance:
+      - "Widget test: 120 mensajes + cargar anteriores + 5 entrantes = 125 contiguos y unread=0 con el chat abierto"
+      - "Emulador: markRead antes que el trigger -> unread=0"
+  - id: T111
+    wave: W1
+    lane: L3
+    title: Cerca cliente - locationSync antes de getNearby, refresh real, caché TTL de 90 s, 0 N+1
+    closes: [FL-10, FL-11, SC-22]
+    depends_on: [T101, T104]
+    owns_paths: ["lib/features/nearby/data/**", "lib/features/nearby/domain/**", "lib/features/nearby/application/**"]
+    acceptance:
+      - "Test con ProviderContainer + fakes: getNearby nunca se ejecuta antes de que updateLocation confirme"
+      - "5 cambios de radio en 60 s -> 1 llamada"
+  - id: T112
+    wave: W1
+    lane: L3
+    title: Flavors reales + guard de release + demo web en un site o canal separado
+    closes: [FL-25, CV-16, B7]
+    depends_on: [T002]
+    owns_paths: ["env/**", "lib/core/config/**"]
+    touches_shared: ["lib/main.dart", "firebase.json", ".github/workflows/**"]
+    acceptance:
+      - "Matriz de tests de defines: release móvil con DEMO_MODE=true -> crash al arrancar; prod nunca resuelve Demo*"
+      - "No quedan ramas demo_ en los servicios live (grep = 0)"
+  - id: T113
+    wave: W1
+    lane: L5
+    title: E2E del loop completo contra emuladores (gate de salida de W1)
+    depends_on: [T103, T107, T109, T110, T111]
+    owns_paths: ["integration_test/loop_e2e_test.dart", "tool/emulator/**"]
+    acceptance:
+      - "completeOnboarding -> updateLocation -> getNearby -> sendWave -> aceptar -> chat visible para ambos -> mensaje -> bloquear -> envío rechazado -> export -> deleteAccount sin PII residual; verde en CI"
+
+  # ───────────────────────── W2 · Privacidad real + escala backend ─────────────────────────
+  - id: T201
+    wave: W2
+    lane: L6
+    title: nearbyIndex desnormalizado + cobertura por radio + K más cercanos + cursor + tarjeta en la respuesta
+    closes: [V-12, V-13, BE-08, BE-09, SC-01, SC-02, SC-03, MO-05, MO-06, CV-14]
+    depends_on: [T113]
+    owns_paths: ["functions/src/nearby/**", "functions/src/pure/geohash.ts"]
+    touches_shared: ["firestore.indexes.json"]
+    acceptance:
+      - "Test de propiedad: 10k centros x radios {0.5,1,2,5,10} km -> 100% de puntos dentro del radio cubiertos"
+      - "5.000 sintéticos en 1 celda -> exactamente los K de la fuerza bruta"
+      - "p95 <= 60 lecturas por llamada (wrapper contador en el emulador); el cliente hace 0 lecturas extra"
+  - id: T202
+    wave: W2
+    lane: L1
+    title: relations/{uid} (blocked, blockedBy, wavedWith) mantenido por callables; regla de profiles con 1 lectura
+    closes: [SC-23, BE-24]
+    depends_on: [T113]
+    owns_paths: ["functions/src/relations/**"]
+    touches_shared: ["firestore.rules"]
+    acceptance:
+      - "getNearby y la regla de profiles hacen 1 lectura de relaciones; tests allow/deny"
+  - id: T203
+    wave: W2
+    lane: L8
+    title: Anti-trilateración - distancia desde la celda p6 del que mira, bucket mínimo de 500 m, ruido HMAC por par/día, simulación en CI
+    closes: [V-11, BE-05, CV-15]
+    depends_on: [T201]
+    owns_paths: ["functions/src/pure/distance.ts", "tool/attack/**"]
+    acceptance:
+      - "tool/attack/trilaterate.ts (3 cuentas coludidas, 100 sondas) -> incertidumbre >= 500 m; corre en CI"
+  - id: T204
+    wave: W2
+    lane: L6
+    title: Rate limiter persistente para todos los callables + consumeAppCheckToken + opciones de runtime por función
+    closes: [BE-21, SC-10, SC-24, MO-19]
+    depends_on: [T113]
+    owns_paths: ["functions/src/platform/**", "functions/src/index.ts", "functions/src/https.ts"]
+    acceptance:
+      - "La llamada N+1 dentro de la ventana -> resource-exhausted, para cada callable de la tabla §7.2"
+      - "Se elimina maxInstances global; ADR con memory/concurrency/min/max por función"
+  - id: T205
+    wave: W2
+    lane: L1
+    title: Endurecer reglas - messages (keys, createdAt, type, bloqueo), blocks y reports solo por callable, users sin campos del servidor, photoUrl, banned
+    closes: [BE-10, BE-11, BE-18, BE-19, CV-23]
+    depends_on: [T202]
+    owns_paths: ["firestore-tests/**"]
+    touches_shared: ["firestore.rules", "storage.rules"]
+    acceptance:
+      - "Matriz >= 80 casos (colección x get/list/create/update/delete x dueño/extraño/bloqueado/baneado/no autenticado) + las 20 sondas de la auditoría: 100% verde"
+  - id: T206
+    wave: W2
+    lane: L1
+    title: sendWave transaccional - ID determinístico, contador diario en la tz de la ciudad, cooldown por par también en Plus, validación de remitente y destinatario
+    closes: [BE-14, SC-19, CV-25]
+    depends_on: [T106]
+    owns_paths: ["functions/src/waves/send*.ts"]
+    acceptance:
+      - "25 llamadas concurrentes -> exactamente el cupo aceptado; re-saludar tras 'ignored' antes de 14 días -> rechazo (también en Plus)"
+  - id: T207
+    wave: W2
+    lane: L1
+    title: TTL + exenciones de índice + índices para todas las queries nuevas (validado con dry-run)
+    closes: [BE-22, SC-09, SC-23]
+    depends_on: [T201, T206]
+    owns_paths: ["tool/emulator/index-check.sh"]
+    touches_shared: ["firestore.indexes.json"]
+    acceptance:
+      - "Cada escritura con TTL setea expireAt (tests); exenciones para messages.text, profiles.bio, waves.note y reports.text"
+  - id: T208
+    wave: W2
+    lane: L1
+    title: Push operativo - firebase_messaging, tokens en subcolección, limpieza de inválidos, mute, dedupe por event.id, coalescencia
+    closes: [BE-17, SC-20, T1-23, MO-12]
+    depends_on: [T106]
+    owns_paths: ["functions/src/push/**", "lib/features/notifications/**"]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "Tests con messaging mockeado: un token inválido se borra; un chat silenciado no notifica; la reentrega no duplica unread"
+      - "Pre-permiso después del primer saludo enviado; navegación desde el payload (test)"
+  - id: T209
+    wave: W2
+    lane: L8
+    title: Moderación - reportUser, moderationQueue con prioridad, claim banned, consola admin mínima, auto-ocultar, métrica de SLA
+    closes: [BE-18, BE-25, SC-21, T1-06]
+    depends_on: [T205]
+    owns_paths: ["functions/src/safety/**", "tool/admin/**"]
+    acceptance:
+      - "Emulador: N reportes únicos -> oculto de Cerca; banned -> todas las escrituras y callables rechazados"
+      - "El mensaje marcado queda pending, no se entrega y se avisa al emisor"
+  - id: T210
+    wave: W2
+    lane: L6
+    title: Prueba de carga + modelo de costos con script + roadmap A/B/C + FinOps (budgets, kill switches)
+    closes: [SC-14, SC-25, MO-06]
+    depends_on: [T201, T204]
+    owns_paths: ["load/**", "docs/scale/**"]
+    acceptance:
+      - "Reporte k6/Artillery: 50k sintéticos, 200 req/s: p95 < 800 ms, errores < 0,5%, US$ por 1.000 llamadas"
+      - "docs/scale/cost-model.md generado por script a 1k/10k/100k DAU; Cerca <= US$0,02/MAU"
+  - id: T211
+    wave: W2
+    lane: L6
+    title: Multi-ciudad (cities/{cityId}) + Remote Config con espejo en servidor (config/runtime) + kill switches
+    closes: [SC-11, SC-12, MO-03]
+    depends_on: [T201]
+    owns_paths: ["functions/src/config/**", "lib/core/config/remote_config*.dart"]
+    acceptance:
+      - "Fixtures de Santiago, Valparaíso y Lima; cupo en la tz local; con plus_enabled=false en la ciudad X no hay paywall y el servidor ignora el radio Plus"
+  - id: T212
+    wave: W2
+    lane: L6
+    title: ADR de región reescrito con evidencia + región por define + aliases dev/stg/prod
+    closes: [BE-23, SC-17, SC-13, FL-30]
+    depends_on: [T003]
+    owns_paths: ["docs/adr/0005-*.md"]
+    touches_shared: [".firebaserc"]
+    acceptance:
+      - "Tabla de disponibilidad oficial (west1 vs east1) con enlace y fecha; RTT medido desde Santiago; D-02 queda planteada al humano"
+
+  # ───────────────────────── W3 · Design system + pantallas Tier-1 ─────────────────────────
+  - id: T301
+    wave: W3
+    lane: L2
+    title: Harness de goldens (Inter, alchemist, matriz) + helper de guidelines de a11y
+    closes: [AG-11, FL-20]
+    depends_on: [T002]
+    owns_paths: ["test/flutter_test_config.dart", "test/goldens/**", "test/support/a11y.dart"]
+    acceptance:
+      - "Matriz §8.3 generada en el CI Linux; PNG como artefacto"
+  - id: T302
+    wave: W3
+    lane: L2
+    title: Consumo de tokens - extensión context.pf, PfType de la spec + tabular, PfSpace/PfRadius/PfMotion/PfHaptics; AppColors @Deprecated
+    closes: [FL-18, CV-09, T1-08, T1-30, T1-33]
+    depends_on: [T301, T005]
+    owns_paths: ["lib/core/design_system/tokens/**", "lib/core/theme/**"]
+    acceptance:
+      - "Tests de tokens; el ratchet se registra (AppColors 376, isDark? 98, AppShadows 13)"
+  - id: T303
+    wave: W3
+    lane: L2
+    title: Los 22 componentes Pf* con estados, Semantics, widget test y golden + galería /_dev/gallery
+    closes: [CV-09, T1-08]
+    depends_on: [T302]
+    owns_paths: ["lib/core/design_system/components/**", "test/design_system/**"]
+    acceptance:
+      - "22/22 componentes; meetsGuideline en light y dark; goldens 1.0/1.3/2.0"
+  - id: T304
+    wave: W3
+    lane: L2
+    title: Marca - isotipo SVG placeholder con pico (D-04), PfLogo, íconos de app (flutter_launcher_icons), splash nativa única, quitar /splash
+    closes: [V-14, T1-01, T1-11, T1-12, D2, D7]
+    depends_on: [T302]
+    owns_paths: ["assets/brand/**", "android/app/src/main/res/**", "ios/Runner/Assets.xcassets/**", "web/icons/**", "web/favicon.png"]
+    touches_shared: ["pubspec.yaml", "web/index.html"]
+    acceptance:
+      - "Check de CI: ningún md5 de ícono coincide con la plantilla de Flutter"
+      - "grep -rn SplashScreen lib = 0; capturas de arranque light/dark sin flash"
+  - id: T305
+    wave: W3
+    lane: L4
+    title: Login v2 - botones oficiales, jerarquía por plataforma, OTP con autofill, panel desktop
+    closes: [D3, T1-13, T1-14, FL-24]
+    depends_on: [T303]
+    owns_paths: ["lib/features/auth/presentation/**", "test/features/auth/**"]
+    acceptance:
+      - "Goldens 375 y 1440 light/dark; test de autofillHints por campo"
+  - id: T306
+    wave: W3
+    lane: L4
+    title: Onboarding de activación - Completar perfil, pre-permiso de ubicación, 'Tu primer saludo'
+    closes: [T1-15]
+    depends_on: [T303, T103, T311]
+    owns_paths: ["lib/features/onboarding/presentation/activation/**"]
+    acceptance:
+      - "Patrol de punta a punta; se emiten onboarding_completed, profile_completed y first_wave_sent (fake analytics)"
+  - id: T307
+    wave: W3
+    lane: L4
+    title: Cerca v2 - PfStat, presets de radio con candado Plus, tarjeta e0, estados de liquidez/offline, Radar en vez de pines (D-09)
+    closes: [T1-16, T1-17, T1-19, FL-26, FL-29]
+    depends_on: [T303, T111]
+    owns_paths: ["lib/features/nearby/presentation/**", "test/features/nearby/**"]
+    acceptance:
+      - "Goldens de cada estado en 375/412/820/1440 x light/dark; ningún marcador de otra persona usa coordenadas geográficas; grep 'Chatear' = 0"
+  - id: T308
+    wave: W3
+    lane: L4
+    title: Ficha pública v2 - fotos, edad, prompts, estados del botón Saludar, panel desktop
+    closes: [T1-18]
+    depends_on: [T303, T107]
+    owns_paths: ["lib/features/profile/presentation/public/**"]
+    acceptance:
+      - "Doble tap -> 1 saludo; goldens de estados; Semantics fusionada"
+  - id: T309
+    wave: W3
+    lane: L4
+    title: Chats v2 + maestro-detalle desktop + chat v2 (tip de seguridad, estados de burbuja, long-press, teclado desktop)
+    closes: [T1-20, T1-34, CHAT-1]
+    depends_on: [T303, T110]
+    owns_paths: ["lib/features/chat/presentation/**"]
+    acceptance:
+      - "Goldens 412 y 1440; test de autoscroll condicionado + píldora de nuevos"
+  - id: T310
+    wave: W3
+    lane: L4
+    title: Mi perfil v2 (Así te ven, completitud, editor) + Ajustes v2 (secciones §7.5, Usuarios bloqueados, consentimientos)
+    closes: [T1-21, FL-13, CV-13, FL-28]
+    depends_on: [T303]
+    owns_paths: ["lib/features/profile/presentation/me/**", "lib/features/settings/presentation/**"]
+    acceptance:
+      - "grep de 'en producción|propuestos|nube|no finales' en strings de release = 0; el email nunca se muestra"
+  - id: T311
+    wave: W3
+    lane: L1
+    title: Pipeline de fotos - image_picker 4:5, compresión, storage.rules, trigger sin EXIF + SafeSearch + blurhash, fotos en web
+    closes: [D9, T1-03, BE-19]
+    depends_on: [T205]
+    owns_paths: ["functions/src/media/**", "storage-tests/**", "lib/features/profile/data/photos*"]
+    touches_shared: ["storage.rules", "pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "Test: el archivo publicado no tiene EXIF/GPS; tests de reglas de Storage; un SVG es rechazado"
+  - id: T312
+    wave: W3
+    lane: L0
+    title: l10n - app_es_CL.arb + gen-l10n + gate de literales + glosario de voice.md
+    closes: [FL-23, T1-32, A6]
+    depends_on: [T305, T307, T309, T310]
+    owns_paths: ["l10n.yaml"]
+    touches_shared: ["lib/l10n/*.arb"]
+    acceptance:
+      - "Gate: 0 Text('literal') en presentation"
+  - id: T313
+    wave: W3
+    lane: L2
+    title: Pasada de accesibilidad - Semantics, 48 dp, foco visible, announce, 200% en 320 px, reporte TalkBack/VoiceOver
+    closes: [D6, FL-22, T1-09, T1-10, CV-20]
+    depends_on: [T305, T307, T308, T309, T310]
+    owns_paths: ["docs/a11y/**"]
+    acceptance:
+      - "4 guidelines en light y dark en todas las pantallas; label activo del rail en dark >= 4,5:1"
+  - id: T314
+    wave: W3
+    lane: L3
+    title: Upgrades mayores aislados (go_router, riverpod, google_sign_in, geolocator) - un PR cada uno (D-16)
+    depends_on: [T313]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "Cada upgrade en su propio PR con la suite completa en verde"
+  - id: T315
+    wave: W3
+    lane: L4
+    title: Ratchet a cero - migrar el resto de pantallas y widgets heredados
+    depends_on: [T305, T307, T308, T309, T310]
+    acceptance:
+      - "tool/gates/baseline.json: AppColors=0, isDark?=0, AppShadows=0, TextStyle(=0 fuera del DS"
+
+  # ───────────────────────── W4 · Trust & Safety + Legal (fecha dura 2026-11-15) ─────────────────────────
+  - id: T401
+    wave: W4
+    lane: L8
+    title: Paquete Ley 21.719 - RAT, EIPD geo/biometría, transferencia internacional, brechas, retención, centro de consentimientos
+    closes: [S12, CV-12]
+    depends_on: [T102]
+    owns_paths: ["docs/legal/**", "web/terminos.html", "web/privacidad.html"]
+    touches_shared: ["firebase.json"]
+    acceptance:
+      - "docs/legal/checklist-21719.md completo con los 9 puntos de §7.6, marcado 'requiere validación legal'"
+      - "/terminos y /privacidad responden 200 en el mismo dominio (test de hosting)"
+  - id: T402
+    wave: W4
+    lane: L1
+    title: deleteAccount durable - cola, worker idempotente, cascada completa, revokeRefreshTokens, auth_time, RevenueCat
+    closes: [BE-15, SC-16, CV-12, MO-13]
+    depends_on: [T113]
+    owns_paths: ["functions/src/account/delete*.ts"]
+    acceptance:
+      - "Usuario con 10k mensajes en 200 chats -> borrado completo (test de barrido = 0 docs con el uid, salvo los declarados)"
+  - id: T403
+    wave: W4
+    lane: L1
+    title: exportMyData async - Storage + URL firmada de 72 h + 1 vez/24 h + esquema completo; el cliente comparte el JSON
+    closes: [BE-16, FL-28]
+    depends_on: [T113]
+    owns_paths: ["functions/src/account/export*.ts"]
+    acceptance:
+      - "Test de esquema contra un fixture; fechas ISO-8601"
+  - id: T404
+    wave: W4
+    lane: L4
+    title: Reportar y bloquear v2 - PfReportSheet, confirmación + deshacer, Usuarios bloqueados con desbloquear
+    closes: [T1-06, FL-13, CV-13]
+    depends_on: [T209, T303]
+    owns_paths: ["lib/features/safety/**"]
+    acceptance:
+      - "Widget tests de cada estado; copy sin SLA hasta que D-11 se resuelva"
+  - id: T405
+    wave: W4
+    lane: L8
+    title: Verificación selfie detrás de un flag (abstracción de proveedor, consentimiento biométrico, filtro gratis)
+    closes: [T1-25, MO-17]
+    depends_on: [T401]
+    owns_paths: ["lib/features/verification/**", "functions/src/verification/**"]
+    acceptance:
+      - "verification_enabled=false por defecto; tests de la abstracción con un proveedor fake"
+  - id: T406
+    wave: W4
+    lane: L5
+    title: Cumplimiento de tiendas - entitlement de SIWA, PrivacyInfo, data-map, Data safety, edad, notas de revisión, fastlane es-CL, capturas por integration_test
+    closes: [T1-28, FL-24, STORE-1]
+    depends_on: [T304, T313]
+    owns_paths: ["fastlane/**", "docs/store/**", "ios/Runner/*.entitlements", "ios/Runner/PrivacyInfo.xcprivacy"]
+    acceptance:
+      - "Checklist de tiendas al 100%; las capturas se generan en CI"
+  - id: T407
+    wave: W4
+    lane: L8
+    title: Cabeceras de seguridad de Hosting + /eliminar-cuenta funcional en web
+    closes: [BE-26]
+    depends_on: [T402]
+    touches_shared: ["firebase.json"]
+    owns_paths: ["web/eliminar-cuenta.html"]
+    acceptance:
+      - "curl -I en el preview channel muestra CSP, frame-ancestors, Referrer-Policy, Permissions-Policy y nosniff"
+
+  # ───────────────────────── W5 · Monetización + growth + analytics (flag apagado) ─────────────────────────
+  - id: T501
+    wave: W5
+    lane: L7
+    title: Analytics con consentimiento - taxonomía + test de emisión por evento + export a BigQuery + log sink + SQL versionado
+    closes: [SC-15, CV-17, T1-29, MO-03]
+    depends_on: [T112, T401]
+    owns_paths: ["lib/core/analytics/**", "analytics/**"]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "Un test por evento; el gate rechaza claves PII; SQL de liquidez por zona, North Star y costo por MAU"
+  - id: T502
+    wave: W5
+    lane: L7
+    title: Métrica de liquidez en servidor (computeLiquidity) + tablero de negocio
+    closes: [MO-03, BE-12]
+    depends_on: [T501, T211]
+    owns_paths: ["functions/src/growth/liquidity*.ts", "docs/product/metrics.md"]
+    acceptance:
+      - "metrics/liquidity/{zone}/{date} con la definición de 'activo' fijada en código"
+  - id: T503
+    wave: W5
+    lane: L7
+    title: Lista de espera real - joinWaitlist, contador por zona, copy honesto, precio fundador
+    closes: [MO-02, T1-07, FL-17]
+    depends_on: [T501]
+    owns_paths: ["lib/features/plus/presentation/waitlist*", "functions/src/growth/waitlist*.ts"]
+    acceptance:
+      - "Emulador + widget: el estado persiste ('Ya estás en la lista'); README, ADR 0002 y PLAN corregidos"
+  - id: T504
+    wave: W5
+    lane: L7
+    title: MonetizationRepository + EntitlementRepository + purchases_flutter (import condicional en web); precios solo desde la tienda
+    closes: [MO-08, MO-14, FL-17]
+    depends_on: [T211]
+    owns_paths: ["lib/features/plus/data/**", "lib/features/plus/domain/**"]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "El build web sigue verde; gate: 0 literales de precio en lib/ fuera de demo"
+  - id: T505
+    wave: W5
+    lane: L7
+    title: Webhook v2 - defineSecret, reconciliación con la API REST, sandbox ignorado, ledger de consumibles, orden de eventos, TRANSFER
+    closes: [BE-13, CV-18, MO-04]
+    depends_on: [T204]
+    owns_paths: ["functions/src/billing/**"]
+    acceptance:
+      - "Tests de tabla: el boost no revoca Plus; un evento viejo no pisa uno nuevo; sandbox ignorado; lifetime activo; Bearer inválido = 401"
+  - id: T506
+    wave: W5
+    lane: L7
+    title: Enforcement de Plus en servidor - incognito vs isVisible (D-05), radio, nota, visitas, deshacer, filtros; ledger de boost con equidad y garantía
+    closes: [BE-12, MO-07, MO-10]
+    depends_on: [T505, T201]
+    owns_paths: ["functions/src/billing/enforce*.ts", "functions/src/billing/boost*.ts"]
+    acceptance:
+      - "Un test de bypass desde el cliente por cada beneficio; el doble webhook no duplica créditos; la garantía devuelve el crédito"
+  - id: T507
+    wave: W5
+    lane: L4
+    title: Paywall v2 - Apple 3.1.2, PfPlanCard, disparadores, tope de frecuencia, holdout, aviso de retracto
+    closes: [T1-22, MO-09, MO-13, FL-29]
+    depends_on: [T504, T303]
+    owns_paths: ["lib/features/plus/presentation/paywall/**"]
+    acceptance:
+      - "Widget test por disparador; paywall_viewed{trigger} emitido; la X es visible en el primer frame; con plus_enabled=false no se renderiza ningún precio"
+  - id: T508
+    wave: W5
+    lane: L7
+    title: Referidos + deep links (App Links/Universal Links validados en CI), /i/:code, /u/:handle, share_plus, OG, antifraude
+    closes: [MO-11, T1-24, GROWTH-1]
+    depends_on: [T113, T504]
+    owns_paths: ["lib/features/growth/**", "functions/src/growth/referral*.ts", "web/.well-known/**"]
+    touches_shared: ["lib/app/router/**", "android/app/src/main/AndroidManifest.xml"]
+    acceptance:
+      - "Tests del router con URIs; validadores de AASA y assetlinks en CI; la recompensa se entrega solo tras la activación del invitado"
+  - id: T509
+    wave: W5
+    lane: L7
+    title: Retención - preferencias de push, horario silencioso, digest semanal opt-in, flag 'Hora Picaflor'
+    closes: [MO-12]
+    depends_on: [T208]
+    owns_paths: ["functions/src/growth/digest*.ts", "lib/features/notifications/presentation/**"]
+    acceptance:
+      - "Tests: nada de push no transaccional entre 22:00 y 09:00 America/Santiago; máximo 3 al día"
+  - id: T510
+    wave: W5
+    lane: L7
+    title: Documentos de negocio - unit-economics (script), launch playbook, ADR de pricing, guardrails de experimentos, ADR de ads, diseño de Panoramas/Lugares
+    closes: [MO-15, MO-16, MO-17, MO-18]
+    depends_on: [T502]
+    owns_paths: ["docs/product/**", "docs/growth/**", "docs/adr/00*-pricing*.md"]
+    acceptance:
+      - "unit-economics recalculable por script con supuestos marcados; go/no-go por zona definido"
+
+  # ───────────────────────── W6 · Release readiness ─────────────────────────
+  - id: T601
+    wave: W6
+    lane: L5
+    title: Observabilidad - Crashlytics y Performance sin PII, logs estructurados, SLOs, alertas, PITR/backups, runbooks
+    closes: [PR-obs]
+    depends_on: [T113]
+    owns_paths: ["docs/ops/**", "lib/core/errors/**"]
+    touches_shared: ["pubspec.yaml", "pubspec.lock"]
+    acceptance:
+      - "SLOs documentados con alertas; runbooks de incidente, abuso, pico de costo, brecha y App Review"
+  - id: T602
+    wave: W6
+    lane: L5
+    title: CI/CD completo - builds Android/iOS, preview channels, OIDC, Dependabot, CodeQL, secret scanning, SBOM, licencias
+    closes: [FL-21, PR-cicd]
+    depends_on: [T005]
+    touches_shared: [".github/**"]
+    acceptance:
+      - "build apk --release (keystore efímero) y build ios --no-codesign en verde; sin JSON de service account en secrets"
+  - id: T603
+    wave: W6
+    lane: L5
+    title: Rendimiento - arranque, jank, presupuesto de bundle y memoria del mapa/radar
+    depends_on: [T315]
+    owns_paths: ["docs/perf/**", "integration_test/perf_*"]
+    acceptance:
+      - "Primer frame < 2,0 s (perfil, Android de gama media); < 1% de frames > 16 ms; bundle <= +10% sobre la línea base"
+  - id: T604
+    wave: W6
+    lane: V
+    title: RECONCILE final + campaña completa de Red Team (§8.5) + scorecard Tier-1 + reporte final
+    depends_on: [T113, T203, T210, T313, T406, T507, T601, T602, T603]
+    owns_paths: ["docs/v2/verify/**", "docs/v2/redteam/**", "docs/v2/report-final.json"]
+    acceptance:
+      - "Scorecard de §3 al 100% o con cada brecha en BLOCKED con decisión; los 16 ataques de §8.5 documentados"
